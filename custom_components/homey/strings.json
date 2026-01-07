@@ -1,0 +1,23 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Homey",
+        "description": "Enter your Homey IP address and API key to connect.",
+        "data": {
+          "host": "Homey IP Address or Hostname",
+          "token": "API Key"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to Homey. Please check:\n- The IP address is correct\n- Homey is powered on and accessible on your network\n- The API key is valid\n- Homey API is enabled",
+      "invalid_auth": "Invalid API key. Please check your API key in Homey Settings → API Keys.",
+      "unknown": "An unexpected error occurred. Check the logs for details."
+    },
+    "abort": {
+      "already_configured": "This Homey hub is already configured."
+    }
+  }
+}
+

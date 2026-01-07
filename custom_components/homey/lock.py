@@ -1,0 +1,80 @@
+"""Support for Homey locks."""
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from homeassistant.components.lock import LockEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from .const import DOMAIN
+from .coordinator import HomeyDataUpdateCoordinator
+from .device_info import get_device_info
+
+_LOGGER = logging.getLogger(__name__)
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up Homey locks from a config entry."""
+    coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    api = hass.data[DOMAIN][entry.entry_id]["api"]
+    zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+
+    entities = []
+    # Use coordinator data if available (more up-to-date), otherwise fetch fresh
+    devices = coordinator.data if coordinator.data else await api.get_devices()
+
+    for device_id, device in devices.items():
+        capabilities = device.get("capabilitiesObj", {})
+        if "locked" in capabilities:
+            entities.append(HomeyLock(coordinator, device_id, device, api, zones))
+
+    async_add_entities(entities)
+
+
+class HomeyLock(CoordinatorEntity, LockEntity):
+    """Representation of a Homey lock."""
+
+    def __init__(
+        self,
+        coordinator: HomeyDataUpdateCoordinator,
+        device_id: str,
+        device: dict[str, Any],
+        api,
+        zones: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
+        """Initialize the lock."""
+        super().__init__(coordinator)
+        self._device_id = device_id
+        self._device = device
+        self._api = api
+        self._attr_name = device.get("name", "Unknown Lock")
+        self._attr_unique_id = f"homey_{device_id}_lock"
+
+        self._attr_device_info = get_device_info(device_id, device, zones)
+
+    @property
+    def is_locked(self) -> bool | None:
+        """Return true if lock is locked."""
+        device_data = self.coordinator.data.get(self._device_id, self._device)
+        capabilities = device_data.get("capabilitiesObj", {})
+        locked = capabilities.get("locked", {}).get("value")
+        return bool(locked) if locked is not None else None
+
+    async def async_lock(self, **kwargs: Any) -> None:
+        """Lock the lock."""
+        await self._api.set_capability_value(self._device_id, "locked", True)
+        await self.coordinator.async_request_refresh()
+
+    async def async_unlock(self, **kwargs: Any) -> None:
+        """Unlock the lock."""
+        await self._api.set_capability_value(self._device_id, "locked", False)
+        await self.coordinator.async_request_refresh()
+
