@@ -27,9 +27,30 @@ This integration bridges your [Homey](https://homey.app) hub with Home Assistant
 - ⚙️ **Easy Setup**: Simple configuration flow through Home Assistant's UI
 - 🎯 **Smart Device Grouping**: All entities from the same device are automatically grouped under one device entry
 
+## Prerequisites
+
+Before installing the integration, you need to create an API Key in Homey:
+
+1. Open the [Homey Web App](https://homey.app)
+2. Go to **Settings** → **API Keys**
+3. Click **New API Key**
+4. Give it a name (e.g., "Home Assistant")
+5. Select the necessary permissions:
+   - `device:read` - Required to read device states
+   - `device:write` - Required to control devices
+   - `flow:read` - Required to list Flows (optional, for Flow support)
+   - `flow:write` - Required to trigger Flows (optional, for Flow support)
+6. Copy the API Key (you won't be able to see it again!)
+
+**Important**: Keep this API Key safe - you'll need it during the setup process!
+
 ## Installation
 
 ### Manual Installation
+
+#### Option 1: Direct File System Access
+
+If you have direct access to your Home Assistant file system (e.g., via SSH, Docker volume, etc.):
 
 1. Download or clone this repository:
    ```bash
@@ -52,26 +73,73 @@ This integration bridges your [Homey](https://homey.app) hub with Home Assistant
 
 5. Search for **"Homey"** and follow the setup instructions
 
+---
+
+#### Option 2: Using Samba (Network Drive)
+
+This is a user-friendly way to access your Home Assistant config folder if you don't have direct file system access.
+
+**Step 1 — Enable Samba in Home Assistant**
+
+1. In Home Assistant UI, go to **Settings** → **Add-ons**
+2. Click **Add-on Store** (if not already there)
+3. Search for **"Samba share"** and install it
+4. Open the add-on configuration
+5. Set:
+   - **Username**: `homeassistant`
+   - **Password**: (choose a password and remember it!)
+6. Click **Save** and then **Start**
+7. Enable **Start on boot** toggle
+
+**Step 2 — Connect from Your Computer**
+
+**On macOS:**
+1. Open **Finder**
+2. Press `⌘ + K` (or go to **Go** → **Connect to Server**)
+3. Enter your Home Assistant IP address:
+   ```
+   smb://YOUR_HA_IP_ADDRESS
+   ```
+   > **Note**: Replace `YOUR_HA_IP_ADDRESS` with your actual Home Assistant IP (e.g., `smb://192.168.1.161`)
+4. Click **Connect**
+5. Log in with:
+   - **Username**: `homeassistant`
+   - **Password**: (the password you set in Step 1)
+6. You'll now see folders like:
+   ```
+   config/
+   └── custom_components/
+   ```
+7. Navigate to `config/custom_components/` and copy the `homey` folder there
+
+**On Windows:**
+1. Open **File Explorer**
+2. In the address bar, type:
+   ```
+   \\YOUR_HA_IP_ADDRESS
+   ```
+   > **Note**: Replace `YOUR_HA_IP_ADDRESS` with your actual Home Assistant IP (e.g., `\\192.168.1.161`)
+3. Press Enter
+4. Log in when prompted with:
+   - **Username**: `homeassistant`
+   - **Password**: (the password you set in Step 1)
+5. Navigate to `config/custom_components/` and copy the `homey` folder there
+
+**Step 3 — Restart Home Assistant**
+
+After copying files:
+- Go to **Settings** → **System** → **Restart**
+
+**Step 4 — Add the Integration**
+
+1. Go to **Settings** → **Devices & Services** → **Add Integration**
+2. Search for **"Homey"** and follow the setup instructions
+
 ### Installation via HACS (Coming Soon)
 
 This integration will be available in HACS in the future.
 
 ## Configuration
-
-### Prerequisites
-
-Before setting up the integration, you need to create an API Key in Homey:
-
-1. Open the [Homey Web App](https://homey.app)
-2. Go to **Settings** → **API Keys**
-3. Click **New API Key**
-4. Give it a name (e.g., "Home Assistant")
-5. Select the necessary permissions:
-   - `device:read` - Required to read device states
-   - `device:write` - Required to control devices
-   - `flow:read` - Required to list Flows (optional, for Flow support)
-   - `flow:write` - Required to trigger Flows (optional, for Flow support)
-6. Copy the API Key (you won't be able to see it again!)
 
 ### Setup Steps
 
