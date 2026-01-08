@@ -35,6 +35,10 @@ async def async_setup_entry(
     entities = []
     # Use coordinator data if available (more up-to-date), otherwise fetch fresh
     devices = coordinator.data if coordinator.data else await api.get_devices()
+    
+    # Filter devices if device_filter is configured
+    from . import filter_devices
+    devices = filter_devices(devices, entry.data.get("device_filter"))
 
     for device_id, device in devices.items():
         capabilities = device.get("capabilitiesObj", {})
@@ -101,10 +105,29 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature."""
         if "temperature" in kwargs:
-            await self._api.set_capability_value(
-                self._device_id, "target_temperature", kwargs["temperature"]
-            )
-            await self.coordinator.async_request_refresh()
+            temperature = kwargs["temperature"]
+            # Ensure temperature is numeric
+            try:
+                if not isinstance(temperature, (int, float)):
+                    temperature = float(temperature)
+                
+                # Set the capability value and check if it succeeded
+                success = await self._api.set_capability_value(
+                    self._device_id, "target_temperature", temperature
+                )
+                
+                if success:
+                    _LOGGER.debug("Successfully set target temperature to %s for device %s", temperature, self._device_id)
+                    # Immediately refresh this device's state for instant UI feedback
+                    await self.coordinator.async_refresh_device(self._device_id)
+                else:
+                    _LOGGER.error(
+                        "Failed to set target temperature to %s for device %s. Check API permissions and device capabilities.",
+                        temperature,
+                        self._device_id,
+                    )
+            except (ValueError, TypeError) as err:
+                _LOGGER.error("Invalid temperature value: %s (%s)", temperature, err)
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set new target hvac mode."""
@@ -118,5 +141,6 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
             capabilities = device_data.get("capabilitiesObj", {})
             if "onoff" in capabilities:
                 await self._api.set_capability_value(self._device_id, "onoff", True)
-        await self.coordinator.async_request_refresh()
+        # Immediately refresh this device's state for instant UI feedback
+        await self.coordinator.async_refresh_device(self._device_id)
 

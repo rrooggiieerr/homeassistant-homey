@@ -34,6 +34,10 @@ async def async_setup_entry(
     entities = []
     # Use coordinator data if available (more up-to-date), otherwise fetch fresh
     devices = coordinator.data if coordinator.data else await api.get_devices()
+    
+    # Filter devices if device_filter is configured
+    from . import filter_devices
+    devices = filter_devices(devices, entry.data.get("device_filter"))
 
     for device_id, device in devices.items():
         capabilities = device.get("capabilitiesObj", {})
@@ -111,35 +115,46 @@ class HomeyMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
         """Send play command."""
         if "speaker_playing" in self._device.get("capabilitiesObj", {}):
             await self._api.set_capability_value(self._device_id, "speaker_playing", True)
-            await self.coordinator.async_request_refresh()
+            # Immediately refresh this device's state for instant UI feedback
+            await self.coordinator.async_refresh_device(self._device_id)
 
     async def async_media_pause(self) -> None:
         """Send pause command."""
         if "speaker_playing" in self._device.get("capabilitiesObj", {}):
             await self._api.set_capability_value(self._device_id, "speaker_playing", False)
-            await self.coordinator.async_request_refresh()
+            # Immediately refresh this device's state for instant UI feedback
+            await self.coordinator.async_refresh_device(self._device_id)
 
     async def async_media_next_track(self) -> None:
         """Send next track command."""
         if "speaker_next" in self._device.get("capabilitiesObj", {}):
             await self._api.set_capability_value(self._device_id, "speaker_next", True)
-            await self.coordinator.async_request_refresh()
+            # Immediately refresh this device's state for instant UI feedback
+            await self.coordinator.async_refresh_device(self._device_id)
 
     async def async_media_previous_track(self) -> None:
         """Send previous track command."""
         if "speaker_prev" in self._device.get("capabilitiesObj", {}):
             await self._api.set_capability_value(self._device_id, "speaker_prev", True)
-            await self.coordinator.async_request_refresh()
+            # Immediately refresh this device's state for instant UI feedback
+            await self.coordinator.async_refresh_device(self._device_id)
 
     async def async_set_volume_level(self, volume: float) -> None:
-        """Set volume level."""
+        """Set volume level.
+        
+        Home Assistant uses normalized volume (0.0-1.0).
+        Homey API also uses normalized volume (0-1), so no conversion needed.
+        """
         if "volume_set" in self._device.get("capabilitiesObj", {}):
+            # Both HA and Homey use normalized 0-1 for volume, so pass through directly
             await self._api.set_capability_value(self._device_id, "volume_set", volume)
-            await self.coordinator.async_request_refresh()
+            # Immediately refresh this device's state for instant UI feedback
+            await self.coordinator.async_refresh_device(self._device_id)
 
     async def async_mute_volume(self, mute: bool) -> None:
         """Mute or unmute volume."""
         if "volume_mute" in self._device.get("capabilitiesObj", {}):
             await self._api.set_capability_value(self._device_id, "volume_mute", mute)
-            await self.coordinator.async_request_refresh()
+            # Immediately refresh this device's state for instant UI feedback
+            await self.coordinator.async_refresh_device(self._device_id)
 

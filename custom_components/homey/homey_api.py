@@ -194,51 +194,207 @@ class HomeyAPI:
         if not self.session:
             return False
 
-        # Try manager API first, then fallback to v1
-        endpoints_to_try = [
-            f"{API_DEVICES}{device_id}/capability/{capability_id}",  # /api/manager/devices/device/{id}/capability/{cap}
-            f"{API_DEVICES_NO_SLASH}/{device_id}/capability/{capability_id}",
-            f"{API_DEVICES_V1}/{device_id}/capability/{capability_id}",  # /api/v1/device/{id}/capability/{cap}
-        ]
+        # Validate and convert value to appropriate type
+        # Handle cases where Home Assistant might pass strings instead of numbers
+        converted_value = self._convert_capability_value(capability_id, value)
         
-        for endpoint in endpoints_to_try:
+        if converted_value is None:
+            _LOGGER.error(
+                "Invalid value for capability %s on device %s: %s (type: %s)",
+                capability_id,
+                device_id,
+                value,
+                type(value).__name__,
+            )
+            return False
+
+        # Try multiple endpoint patterns and HTTP methods
+        # Use preferred_endpoint if available, otherwise try all
+        if self.preferred_endpoint == "manager":
+            base_endpoints = [
+                (API_DEVICES, "manager"),
+                (API_DEVICES_NO_SLASH, "manager"),
+            ]
+        elif self.preferred_endpoint == "v1":
+            base_endpoints = [
+                (API_DEVICES_V1, "v1"),
+            ]
+        else:
+            base_endpoints = [
+                (API_DEVICES, "manager"),
+                (API_DEVICES_NO_SLASH, "manager"),
+                (API_DEVICES_V1, "v1"),
+            ]
+        
+        endpoints_to_try = []
+        for base_endpoint, _ in base_endpoints:
+            # Try different endpoint formats
+            # Format 1: /api/manager/devices/device/{id}/capability/{cap}
+            endpoints_to_try.append((f"{base_endpoint}{device_id}/capability/{capability_id}", "PUT"))
+            # Format 2: /api/manager/devices/device/{id}/capability/{cap}/ (with trailing slash)
+            endpoints_to_try.append((f"{base_endpoint}{device_id}/capability/{capability_id}/", "PUT"))
+            # Format 3: /api/manager/devices/device/{id}/capability/{cap} (without trailing slash on base)
+            if base_endpoint.endswith("/"):
+                endpoints_to_try.append((f"{base_endpoint[:-1]}/{device_id}/capability/{capability_id}", "PUT"))
+            # Try POST as well
+            endpoints_to_try.append((f"{base_endpoint}{device_id}/capability/{capability_id}", "POST"))
+            endpoints_to_try.append((f"{base_endpoint}{device_id}/capability/{capability_id}/", "POST"))
+            if base_endpoint.endswith("/"):
+                endpoints_to_try.append((f"{base_endpoint[:-1]}/{device_id}/capability/{capability_id}", "POST"))
+        
+        for endpoint, method in endpoints_to_try:
             try:
-                async with self.session.put(
-                    f"{self.host}{endpoint}",
-                    json={"value": value},
-                ) as response:
-                    if response.status == 200:
-                        return True
-                    elif response.status == 404:
-                        _LOGGER.debug("Capability endpoint %s not found, trying next...", endpoint)
-                        continue
-                    else:
-                        error_text = await response.text()
-                        _LOGGER.debug(
-                            "Failed to set capability %s on device %s via %s: %s - %s",
-                            capability_id,
-                            device_id,
-                            endpoint,
-                            response.status,
-                            error_text,
-                        )
-                        continue
+                if method == "PUT":
+                    async with self.session.put(
+                        f"{self.host}{endpoint}",
+                        json={"value": converted_value},
+                    ) as response:
+                        if response.status == 200:
+                            _LOGGER.debug("Successfully set capability %s=%s on device %s via %s", capability_id, converted_value, device_id, endpoint)
+                            return True
+                        elif response.status == 404:
+                            _LOGGER.debug("Capability endpoint %s not found, trying next...", endpoint)
+                            continue
+                        else:
+                            error_text = await response.text()
+                            _LOGGER.info(
+                                "Failed to set capability %s=%s on device %s via %s (%s): %s - %s",
+                                capability_id,
+                                converted_value,
+                                device_id,
+                                endpoint,
+                                method,
+                                response.status,
+                                error_text[:200] if error_text else "No error text",
+                            )
+                            continue
+                else:  # POST
+                    async with self.session.post(
+                        f"{self.host}{endpoint}",
+                        json={"value": converted_value},
+                    ) as response:
+                        if response.status == 200:
+                            _LOGGER.debug("Successfully set capability %s=%s on device %s via %s", capability_id, converted_value, device_id, endpoint)
+                            return True
+                        elif response.status == 404:
+                            _LOGGER.debug("Capability endpoint %s not found, trying next...", endpoint)
+                            continue
+                        else:
+                            error_text = await response.text()
+                            _LOGGER.info(
+                                "Failed to set capability %s=%s on device %s via %s (%s): %s - %s",
+                                capability_id,
+                                converted_value,
+                                device_id,
+                                endpoint,
+                                method,
+                                response.status,
+                                error_text[:200] if error_text else "No error text",
+                            )
+                            continue
             except Exception as err:
-                _LOGGER.debug(
-                    "Error setting capability %s on device %s via %s: %s",
+                _LOGGER.info(
+                    "Exception setting capability %s=%s on device %s via %s (%s): %s",
                     capability_id,
+                    converted_value,
                     device_id,
                     endpoint,
+                    method,
                     err,
                 )
                 continue
         
+        # Log all endpoints we tried for debugging
         _LOGGER.error(
-            "Failed to set capability %s on device %s from any endpoint",
+            "Failed to set capability %s=%s on device %s from any endpoint. Tried %d endpoints: %s",
             capability_id,
+            converted_value,
             device_id,
+            len(endpoints_to_try),
+            [f"{endpoint} ({method})" for endpoint, method in endpoints_to_try[:5]],  # Show first 5
         )
         return False
+
+    def _convert_capability_value(self, capability_id: str, value: Any) -> Any:
+        """Convert value to appropriate type and format for the capability.
+        
+        Homey API uses normalized values (0-1) for many capabilities, while
+        Home Assistant uses different ranges. This function handles the conversion.
+        
+        Format conversions:
+        - light_hue: HA 0-360 → Homey 0-1 (handled in light.py before calling this)
+        - light_saturation: HA 0-100 → Homey 0-1 (handled in light.py before calling this)
+        - dim: HA 0-255 → Homey 0-1 (handled in light.py before calling this)
+        - fan_speed: HA 0-100 → Homey 0-1 (handled in fan.py before calling this)
+        - windowcoverings_state: HA 0-100 → Homey 0-1 (handled in cover.py before calling this)
+        - volume_set: HA 0.0-1.0 → Homey 0-1 (no conversion needed, both normalized)
+        - light_temperature: Both use Kelvin, no conversion needed
+        - target_temperature: Both use Celsius, no conversion needed
+        """
+        # Handle None values
+        if value is None:
+            return None
+        
+        # Handle boolean capabilities
+        if capability_id == "onoff" or capability_id == "locked" or capability_id == "volume_mute":
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                value_lower = value.lower().strip()
+                if value_lower in ("true", "1", "on", "yes"):
+                    return True
+                if value_lower in ("false", "0", "off", "no"):
+                    return False
+            # Try to convert to bool
+            try:
+                return bool(int(value))
+            except (ValueError, TypeError):
+                _LOGGER.warning("Cannot convert %s to boolean for capability %s", value, capability_id)
+                return None
+        
+        # Handle numeric capabilities - reject non-numeric strings
+        numeric_capabilities = [
+            "dim", "light_hue", "light_saturation", "light_temperature",
+            "target_temperature", "measure_temperature", "fan_speed",
+            "volume_set", "windowcoverings_state",
+        ]
+        
+        if capability_id in numeric_capabilities:
+            # If it's already a number, return it
+            # Note: Format conversions (e.g., 0-360 → 0-1) are handled in platform files
+            # before calling this function, so we just need to ensure it's a float
+            if isinstance(value, (int, float)):
+                return float(value)
+            
+            # If it's a string, try to convert it
+            if isinstance(value, str):
+                value_stripped = value.strip()
+                # Reject strings that look like errors (e.g., "idleidleidle...")
+                if not value_stripped or not value_stripped.replace(".", "").replace("-", "").isdigit():
+                    _LOGGER.warning(
+                        "Invalid numeric value for capability %s: %s (appears to be a string, not a number)",
+                        capability_id,
+                        value[:50] if len(str(value)) > 50 else value,
+                    )
+                    return None
+                try:
+                    return float(value_stripped)
+                except (ValueError, TypeError):
+                    _LOGGER.warning("Cannot convert %s to float for capability %s", value, capability_id)
+                    return None
+            
+            # For other types, try to convert
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                _LOGGER.warning("Cannot convert %s to float for capability %s", value, capability_id)
+                return None
+        
+        # For other capabilities, return as-is but log if it's an unexpected string
+        if isinstance(value, str) and len(value) > 50:
+            _LOGGER.debug("Long string value for capability %s: %s...", capability_id, value[:50])
+        
+        return value
 
     async def get_capability_value(
         self, device_id: str, capability_id: str
@@ -285,7 +441,8 @@ class HomeyAPI:
                 _LOGGER.debug("Error getting flows from %s: %s", endpoint, err)
                 continue
 
-        _LOGGER.warning("Failed to get flows from any endpoint")
+        # Flows are optional - user may not have flow:read permission or flows may not be available
+        _LOGGER.debug("Flows not available (this is normal if flow:read permission is missing)")
         return {}
 
     async def trigger_flow(self, flow_id: str) -> bool:
@@ -293,37 +450,72 @@ class HomeyAPI:
         if not self.session:
             return False
 
-        # Try manager API first, then fallback to v1
+        # Try different endpoints and HTTP methods
+        # Homey API might use POST to /trigger or PUT to /run
         endpoints_to_try = [
-            f"{API_FLOWS}{flow_id}/trigger",  # /api/manager/flows/flow/{id}/trigger
-            f"{API_FLOWS}/{flow_id}/trigger",  # Without trailing slash on base
-            f"{API_BASE_V1}/flow/{flow_id}/trigger",  # /api/v1/flow/{id}/trigger
+            (f"{API_FLOWS}/{flow_id}/trigger", "POST"),  # /api/manager/flows/flow/{id}/trigger
+            (f"{API_FLOWS}/{flow_id}/run", "PUT"),  # /api/manager/flows/flow/{id}/run
+            (f"{API_FLOWS}/{flow_id}/run", "POST"),  # POST to /run
+            (f"{API_BASE_V1}/flow/{flow_id}/trigger", "POST"),  # /api/v1/flow/{id}/trigger
+            (f"{API_BASE_V1}/flow/{flow_id}/run", "PUT"),  # /api/v1/flow/{id}/run
         ]
 
-        for endpoint in endpoints_to_try:
+        for endpoint, method in endpoints_to_try:
             try:
-                async with self.session.post(f"{self.host}{endpoint}") as response:
-                    if response.status == 200:
-                        _LOGGER.info("Successfully triggered flow %s", flow_id)
-                        return True
-                    elif response.status == 404:
-                        _LOGGER.debug("Flow trigger endpoint %s not found, trying next...", endpoint)
-                        continue
-                    else:
-                        error_text = await response.text()
-                        _LOGGER.debug(
-                            "Failed to trigger flow %s via %s: %s - %s",
-                            flow_id,
-                            endpoint,
-                            response.status,
-                            error_text,
-                        )
-                        continue
+                url = f"{self.host}{endpoint}"
+                _LOGGER.debug("Trying to trigger flow %s via %s %s", flow_id, method, url)
+                
+                if method == "POST":
+                    async with self.session.post(url) as response:
+                        status = response.status
+                        if status == 200 or status == 204:
+                            _LOGGER.info("Successfully triggered flow %s via %s", flow_id, endpoint)
+                            return True
+                        elif status == 404:
+                            _LOGGER.debug("Flow trigger endpoint %s not found, trying next...", endpoint)
+                            continue
+                        else:
+                            try:
+                                error_text = await response.text()
+                            except:
+                                error_text = f"Status {status}"
+                            _LOGGER.debug(
+                                "Failed to trigger flow %s via %s %s: %s - %s",
+                                flow_id,
+                                method,
+                                endpoint,
+                                status,
+                                error_text[:200],
+                            )
+                            continue
+                else:  # PUT
+                    async with self.session.put(url) as response:
+                        status = response.status
+                        if status == 200 or status == 204:
+                            _LOGGER.info("Successfully triggered flow %s via %s", flow_id, endpoint)
+                            return True
+                        elif status == 404:
+                            _LOGGER.debug("Flow trigger endpoint %s not found, trying next...", endpoint)
+                            continue
+                        else:
+                            try:
+                                error_text = await response.text()
+                            except:
+                                error_text = f"Status {status}"
+                            _LOGGER.debug(
+                                "Failed to trigger flow %s via %s %s: %s - %s",
+                                flow_id,
+                                method,
+                                endpoint,
+                                status,
+                                error_text[:200],
+                            )
+                            continue
             except Exception as err:
-                _LOGGER.debug("Error triggering flow %s via %s: %s", flow_id, endpoint, err)
+                _LOGGER.debug("Error triggering flow %s via %s %s: %s", flow_id, method, endpoint, err)
                 continue
 
-        _LOGGER.error("Failed to trigger flow %s from any endpoint", flow_id)
+        _LOGGER.error("Failed to trigger flow %s from any endpoint. Check logs for details.", flow_id)
         return False
 
     async def get_zones(self) -> dict[str, dict[str, Any]]:

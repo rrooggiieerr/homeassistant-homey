@@ -23,6 +23,8 @@ from .device_info import get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
+# Module loaded - no need to log this on every restart
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -30,6 +32,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Homey lights from a config entry."""
+    _LOGGER.info("Setting up Homey lights platform")
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
@@ -37,6 +40,12 @@ async def async_setup_entry(
     entities = []
     # Use coordinator data if available (more up-to-date), otherwise fetch fresh
     devices = coordinator.data if coordinator.data else await api.get_devices()
+    
+    # Filter devices if device_filter is configured
+    from . import filter_devices
+    devices = filter_devices(devices, entry.data.get("device_filter"))
+    
+    _LOGGER.info("Found %d devices to check for light capabilities", len(devices))
 
     for device_id, device in devices.items():
         capabilities = device.get("capabilitiesObj", {})
@@ -48,6 +57,7 @@ async def async_setup_entry(
         ):
             entities.append(HomeyLight(coordinator, device_id, device, api, zones))
 
+    _LOGGER.debug("Created %d Homey light entities", len(entities))
     async_add_entities(entities)
 
 
@@ -80,14 +90,12 @@ class HomeyLight(CoordinatorEntity, LightEntity):
         
         if has_hs:
             # If HS color is available, use it (can't combine with COLOR_TEMP)
+            # HS mode automatically includes brightness, so don't add BRIGHTNESS separately
             color_modes.add(ColorMode.HS)
-            if has_dim:
-                color_modes.add(ColorMode.BRIGHTNESS)
         elif has_temp:
             # If only color temp is available, use it
+            # COLOR_TEMP mode automatically includes brightness, so don't add BRIGHTNESS separately
             color_modes.add(ColorMode.COLOR_TEMP)
-            if has_dim:
-                color_modes.add(ColorMode.BRIGHTNESS)
         elif has_dim:
             # Only dimming available
             color_modes.add(ColorMode.BRIGHTNESS)
@@ -97,6 +105,18 @@ class HomeyLight(CoordinatorEntity, LightEntity):
 
         self._attr_supported_color_modes = color_modes
         self._attr_color_mode = next(iter(color_modes)) if color_modes else ColorMode.ONOFF
+        
+        # Log color modes for debugging (use INFO so it shows in logs)
+        _LOGGER.info(
+            "Light %s (%s) initialized - Capabilities: dim=%s, hs=%s, temp=%s - Color modes: %s, Current mode: %s",
+            device_id,
+            device.get("name", "Unknown"),
+            has_dim,
+            has_hs,
+            has_temp,
+            color_modes,
+            self._attr_color_mode,
+        )
         
         # Set color temperature range in Kelvin (required for COLOR_TEMP mode)
         if ColorMode.COLOR_TEMP in color_modes:
@@ -115,6 +135,18 @@ class HomeyLight(CoordinatorEntity, LightEntity):
         return capabilities.get("onoff", {}).get("value", False)
 
     @property
+    def supported_color_modes(self) -> set[ColorMode]:
+        """Return the supported color modes."""
+        # Removed excessive logging - only log on first query or if needed for debugging
+        return self._attr_supported_color_modes
+    
+    @property
+    def color_mode(self) -> ColorMode:
+        """Return the current color mode."""
+        # Removed excessive logging - only log on first query or if needed for debugging
+        return self._attr_color_mode
+
+    @property
     def brightness(self) -> int | None:
         """Return the brightness of the light."""
         device_data = self.coordinator.data.get(self._device_id, self._device)
@@ -129,9 +161,12 @@ class HomeyLight(CoordinatorEntity, LightEntity):
         """Return the hue and saturation color value."""
         device_data = self.coordinator.data.get(self._device_id, self._device)
         capabilities = device_data.get("capabilitiesObj", {})
-        hue = capabilities.get("light_hue", {}).get("value")
-        saturation = capabilities.get("light_saturation", {}).get("value")
-        if hue is not None and saturation is not None:
+        hue_normalized = capabilities.get("light_hue", {}).get("value")
+        saturation_normalized = capabilities.get("light_saturation", {}).get("value")
+        if hue_normalized is not None and saturation_normalized is not None:
+            # Homey returns normalized values (0-1), convert to Home Assistant format (hue 0-360, sat 0-100)
+            hue = hue_normalized * 360.0
+            saturation = saturation_normalized * 100.0
             return (hue, saturation)
         return None
 
@@ -147,33 +182,158 @@ class HomeyLight(CoordinatorEntity, LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on."""
+        _LOGGER.debug("Turning on light %s (%s) with args: %s", self._attr_name, self._device_id, list(kwargs.keys()))
+        
         capabilities_to_set = {}
 
         if ATTR_BRIGHTNESS in kwargs:
             brightness = kwargs[ATTR_BRIGHTNESS]
-            capabilities_to_set["dim"] = brightness / 255.0
+            # Ensure brightness is numeric
+            try:
+                brightness = int(brightness) if not isinstance(brightness, (int, float)) else brightness
+                capabilities_to_set["dim"] = brightness / 255.0
+            except (ValueError, TypeError):
+                _LOGGER.warning("Invalid brightness value: %s", brightness)
+                # Skip brightness setting if invalid
 
         if ATTR_HS_COLOR in kwargs:
             hs_color = kwargs[ATTR_HS_COLOR]
-            capabilities_to_set["light_hue"] = hs_color[0]
-            capabilities_to_set["light_saturation"] = hs_color[1]
+            try:
+                hue = float(hs_color[0])
+                saturation = float(hs_color[1])
+                
+                # Home Assistant uses hue 0-360 and saturation 0-100
+                # Homey API uses normalized values: hue 0-1 and saturation 0-1
+                # Ensure values are within valid ranges
+                hue = max(0, min(360, hue))  # Clamp to 0-360
+                saturation = max(0, min(100, saturation))  # Clamp to 0-100
+                
+                # Convert to Homey's normalized format (0-1)
+                hue_normalized = hue / 360.0
+                saturation_normalized = saturation / 100.0
+                
+                # Log color conversion for debugging
+                _LOGGER.debug(
+                    "Setting color for light %s (%s): HA hue=%.2f, sat=%.2f -> Homey hue=%.4f, sat=%.4f",
+                    self._device_id, self._attr_name, hue, saturation, hue_normalized, saturation_normalized
+                )
+                
+                capabilities_to_set["light_hue"] = hue_normalized
+                capabilities_to_set["light_saturation"] = saturation_normalized
+            except (ValueError, TypeError, IndexError) as err:
+                _LOGGER.warning("Invalid HS color value: %s (%s)", hs_color, err)
+                # Skip color setting if invalid
 
         if ATTR_COLOR_TEMP_KELVIN in kwargs:
             kelvin = kwargs[ATTR_COLOR_TEMP_KELVIN]
-            capabilities_to_set["light_temperature"] = kelvin
+            try:
+                capabilities_to_set["light_temperature"] = int(kelvin) if not isinstance(kelvin, (int, float)) else kelvin
+            except (ValueError, TypeError):
+                _LOGGER.warning("Invalid color temperature value: %s", kelvin)
+                # Skip temperature setting if invalid
+        
+        # If color temp is being set, remove color (HS) capabilities as they're mutually exclusive
+        if "light_temperature" in capabilities_to_set:
+            capabilities_to_set.pop("light_hue", None)
+            capabilities_to_set.pop("light_saturation", None)
+        
+        # If color (HS) is being set, remove color temp as they're mutually exclusive
+        if "light_hue" in capabilities_to_set or "light_saturation" in capabilities_to_set:
+            capabilities_to_set.pop("light_temperature", None)
 
-        # Always turn on if not already on
+        # Always turn on if not already on - this must happen first
+        # Also ensure brightness is set if color is being set (some devices need brightness > 0 for color to show)
         if not self.is_on:
-            await self._api.set_capability_value(self._device_id, "onoff", True)
+            success = await self._api.set_capability_value(self._device_id, "onoff", True)
+            if not success:
+                _LOGGER.error("Failed to turn on light %s", self._device_id)
+                return
+        
+        # If setting color but no brightness specified, ensure minimum brightness for color visibility
+        if ("light_hue" in capabilities_to_set or "light_saturation" in capabilities_to_set) and "dim" not in capabilities_to_set:
+            current_brightness = self.brightness
+            if current_brightness is None or current_brightness == 0:
+                # Set minimum brightness so color is visible
+                capabilities_to_set["dim"] = 0.1  # 10% brightness minimum
+                _LOGGER.info("Setting minimum brightness (10%%) for color visibility on light %s (%s)", self._device_id, self._attr_name)
 
-        # Set other capabilities
+        # Set color capabilities first (hue and saturation together)
+        # Some devices require both to be set for color changes to work
+        # IMPORTANT: Set saturation BEFORE hue, as some devices need saturation set first
+        if "light_hue" in capabilities_to_set and "light_saturation" in capabilities_to_set:
+            # Set saturation first, then hue
+            sat_success = await self._api.set_capability_value(
+                self._device_id, "light_saturation", capabilities_to_set["light_saturation"]
+            )
+            hue_success = await self._api.set_capability_value(
+                self._device_id, "light_hue", capabilities_to_set["light_hue"]
+            )
+            
+            if not sat_success:
+                _LOGGER.error(
+                    "Failed to set saturation %.2f for light %s",
+                    capabilities_to_set["light_saturation"], self._device_id
+                )
+            if not hue_success:
+                _LOGGER.error(
+                    "Failed to set hue %.2f for light %s",
+                    capabilities_to_set["light_hue"], self._device_id
+                )
+            
+            if sat_success and hue_success:
+                _LOGGER.info(
+                    "Successfully set color: hue=%.2f, saturation=%.2f for light %s (%s)",
+                    capabilities_to_set["light_hue"],
+                    capabilities_to_set["light_saturation"],
+                    self._device_id,
+                    self._attr_name
+                )
+            else:
+                _LOGGER.warning(
+                    "Color setting partially failed for light %s (%s): hue_success=%s, sat_success=%s",
+                    self._device_id, self._attr_name, hue_success, sat_success
+                )
+            
+            # Remove from dict so we don't set them again
+            del capabilities_to_set["light_hue"]
+            del capabilities_to_set["light_saturation"]
+
+        # Set other capabilities (brightness, color temp, etc.)
         for capability, value in capabilities_to_set.items():
-            await self._api.set_capability_value(self._device_id, capability, value)
+            success = await self._api.set_capability_value(self._device_id, capability, value)
+            if not success:
+                _LOGGER.error("Failed to set capability %s for light %s", capability, self._device_id)
 
-        await self.coordinator.async_request_refresh()
+        # Immediately refresh this device's state for instant UI feedback
+        await self.coordinator.async_refresh_device(self._device_id)
+        
+        # Log the actual device state after refresh to verify it changed
+        device_data = self.coordinator.data.get(self._device_id, self._device)
+        capabilities = device_data.get("capabilitiesObj", {})
+        current_hue_normalized = capabilities.get("light_hue", {}).get("value")
+        current_sat_normalized = capabilities.get("light_saturation", {}).get("value")
+        current_dim = capabilities.get("dim", {}).get("value")
+        current_onoff = capabilities.get("onoff", {}).get("value")
+        
+        # Log device state after color change for debugging
+        if ATTR_HS_COLOR in kwargs:
+            current_hue_ha = current_hue_normalized * 360.0 if current_hue_normalized is not None else None
+            current_sat_ha = current_sat_normalized * 100.0 if current_sat_normalized is not None else None
+            _LOGGER.debug(
+                "After refresh - Device %s (%s) reports: hue_norm=%.4f (HA=%.2f°), sat_norm=%.4f (HA=%.2f%%)",
+                self._device_id, self._attr_name,
+                current_hue_normalized or 0, current_hue_ha or 0,
+                current_sat_normalized or 0, current_sat_ha or 0
+            )
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
-        await self._api.set_capability_value(self._device_id, "onoff", False)
-        await self.coordinator.async_request_refresh()
+        _LOGGER.debug("Turning off light %s (%s)", self._attr_name, self._device_id)
+        
+        success = await self._api.set_capability_value(self._device_id, "onoff", False)
+        if not success:
+            _LOGGER.error("Failed to turn off light %s (%s)", self._device_id, self._attr_name)
+        
+        # Immediately refresh this device's state for instant UI feedback
+        await self.coordinator.async_refresh_device(self._device_id)
 

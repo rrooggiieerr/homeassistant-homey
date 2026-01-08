@@ -45,6 +45,10 @@ async def async_setup_entry(
     entities = []
     # Use coordinator data if available (more up-to-date), otherwise fetch fresh
     devices = coordinator.data if coordinator.data else await api.get_devices()
+    
+    # Filter devices if device_filter is configured
+    from . import filter_devices
+    devices = filter_devices(devices, entry.data.get("device_filter"))
 
     for device_id, device in devices.items():
         capabilities = device.get("capabilitiesObj", {})
@@ -86,7 +90,44 @@ class HomeyBinarySensor(CoordinatorEntity, BinarySensorEntity):
     def is_on(self) -> bool:
         """Return true if the binary sensor is on."""
         device_data = self.coordinator.data.get(self._device_id, self._device)
+        if not device_data:
+            return False
+        
         capabilities = device_data.get("capabilitiesObj", {})
-        value = capabilities.get(self._capability_id, {}).get("value", False)
-        return bool(value)
+        if not capabilities:
+            return False
+        
+        capability = capabilities.get(self._capability_id)
+        if not capability:
+            return False
+        
+        value = capability.get("value")
+        
+        # Handle different value formats
+        if value is None:
+            return False
+        
+        # Handle boolean values
+        if isinstance(value, bool):
+            return value
+        
+        # Handle string values ("true", "false", "1", "0")
+        if isinstance(value, str):
+            value_lower = value.lower().strip()
+            if value_lower in ("true", "1", "on", "yes"):
+                return True
+            if value_lower in ("false", "0", "off", "no", ""):
+                return False
+            # Try to parse as number
+            try:
+                return bool(int(value))
+            except (ValueError, TypeError):
+                _LOGGER.warning("Unknown binary sensor value format for %s.%s: %s", self._device_id, self._capability_id, value)
+                return False
+        
+        # Handle numeric values (0/1)
+        try:
+            return bool(int(value))
+        except (ValueError, TypeError):
+            return bool(value)
 

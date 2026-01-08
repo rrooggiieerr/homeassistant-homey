@@ -2,16 +2,27 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 
-from .const import DOMAIN
+from .const import CONF_DEVICE_FILTER, DOMAIN
 from .coordinator import HomeyDataUpdateCoordinator
 from .homey_api import HomeyAPI
 
 _LOGGER = logging.getLogger(__name__)
+
+# Module loaded
+
+
+def filter_devices(devices: dict[str, dict[str, Any]], device_filter: list[str] | None) -> dict[str, dict[str, Any]]:
+    """Filter devices based on device_filter configuration."""
+    if device_filter:
+        return {did: dev for did, dev in devices.items() if did in device_filter}
+    return devices
 
 PLATFORMS: list[Platform] = [
     Platform.LIGHT,
@@ -25,6 +36,91 @@ PLATFORMS: list[Platform] = [
     Platform.MEDIA_PLAYER,
     Platform.BUTTON,  # For Homey flows
 ]
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, config_entry: ConfigEntry, device_entry: dr.DeviceEntry
+) -> bool:
+    """Handle removal of a device from the device registry.
+    
+    This allows users to manually delete devices from the Devices page.
+    When a device is deleted, we remove it from the device_filter.
+    """
+    device_registry = dr.async_get(hass)
+    
+    # Find the device_id from the device entry identifiers
+    device_id = None
+    for identifier in device_entry.identifiers:
+        if identifier[0] == DOMAIN:
+            device_id = identifier[1]
+            break
+    
+    if not device_id:
+        _LOGGER.warning("Could not find device_id for device %s", device_entry.id)
+        return False
+    
+    # Get current device filter
+    current_filter = config_entry.data.get(CONF_DEVICE_FILTER)
+    
+    # If device_filter is None, it means all devices are selected
+    # In that case, we need to get all devices and create a filter excluding this one
+    if current_filter is None:
+        # Get all devices from coordinator or API
+        if config_entry.entry_id in hass.data.get(DOMAIN, {}):
+            coordinator = hass.data[DOMAIN][config_entry.entry_id].get("coordinator")
+            api = hass.data[DOMAIN][config_entry.entry_id].get("api")
+            
+            # Try to get devices from coordinator first (most up-to-date)
+            if coordinator and coordinator.data:
+                all_device_ids = set(coordinator.data.keys())
+            elif api:
+                # Fallback to API if coordinator doesn't have data yet
+                try:
+                    devices = await api.get_devices()
+                    all_device_ids = set(devices.keys())
+                except Exception:
+                    _LOGGER.warning("Could not fetch devices to update filter")
+                    all_device_ids = set()
+            else:
+                all_device_ids = set()
+            
+            # Remove the device being deleted
+            all_device_ids.discard(device_id)
+            new_filter = list(all_device_ids) if all_device_ids else []
+        else:
+            # Integration not loaded - fetch devices from API directly
+            try:
+                api = HomeyAPI(
+                    host=config_entry.data["host"],
+                    token=config_entry.data["token"],
+                    preferred_endpoint=config_entry.data.get("working_endpoint"),
+                )
+                await api.connect()
+                devices = await api.get_devices()
+                all_device_ids = set(devices.keys())
+                all_device_ids.discard(device_id)
+                new_filter = list(all_device_ids) if all_device_ids else []
+                await api.disconnect()
+            except Exception as err:
+                _LOGGER.warning("Could not fetch devices to update filter: %s", err)
+                # Can't determine all devices, create filter with just this device excluded
+                # This will be corrected on next reload
+                new_filter = []
+    else:
+        # Remove device_id from filter
+        new_filter = [did for did in current_filter if did != device_id]
+    
+    # Update config entry with new filter
+    new_data = {**config_entry.data}
+    new_data[CONF_DEVICE_FILTER] = new_filter if new_filter else None
+    
+    hass.config_entries.async_update_entry(config_entry, data=new_data)
+    
+    _LOGGER.info("Removed device %s from device filter", device_id)
+    
+    # Return True to indicate we handled the removal
+    # Home Assistant will then remove the device and entities
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -51,7 +147,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.error("Cannot access Homey API - no devices endpoint accessible")
                 return False
     except Exception as err:
-        _LOGGER.error("Failed to connect to Homey: %s", err)
+        _LOGGER.error("Failed to connect to Homey: %s", err, exc_info=True)
         return False
 
     # Fetch zones (rooms) for device organization
@@ -69,6 +165,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Forward the setup to the platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Refresh zones and assign areas to devices based on Homey zones (after entities are created)
+    coordinator.zones = await api.get_zones() or {}
+    await coordinator._assign_areas_to_devices()
+    
+    # Remove devices that are no longer in device_filter
+    await coordinator._remove_unselected_devices(entry)
 
     # Register service to trigger flows
     async def async_trigger_flow(call) -> None:

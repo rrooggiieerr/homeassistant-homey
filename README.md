@@ -4,6 +4,8 @@
 [![GitHub issues](https://img.shields.io/github/issues/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/issues)
 [![GitHub stars](https://img.shields.io/github/stars/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/stargazers)
 
+**Version**: 1.0.1 | **Last Updated**: 2026-01-08 | [Changelog](CHANGELOG.md)
+
 A Home Assistant integration that automatically discovers and connects all your Homey devices, making them available natively in Home Assistant.
 
 ## Overview
@@ -17,13 +19,13 @@ This integration bridges your [Homey](https://homey.app) hub with Home Assistant
 - 🔍 **Automatic Device Discovery**: Automatically discovers all devices from your Homey hub
 - 💡 **Multiple Entity Types**: Supports lights, switches, sensors, binary sensors, covers, climate devices, fans, locks, and media players
 - 🎨 **Full Light Control**: Supports dimming, color (HS), and color temperature control
-- 📊 **Comprehensive Sensors**: Temperature, humidity, pressure, power, voltage, current, luminance, CO2, CO, and more
-- 🚨 **Security Sensors**: Motion, contact, tamper, smoke, CO/CO2 alarms, water leak, and battery sensors
+- 📊 **Comprehensive Sensors**: Temperature, humidity, pressure, power, voltage, current, luminance, CO2, and CO
+- 🚨 **Security Sensors**: Motion, contact, tamper, smoke, CO alarm, CO2 alarm, water leak, and battery sensors
 - 🌡️ **Climate Control**: Thermostat support with target temperature control
 - 🎬 **Homey Flows**: Trigger your Homey automations (Flows) from Home Assistant as button entities or via service calls
 - 🏠 **Room Organization**: Automatically assigns devices to Home Assistant Areas based on Homey rooms
 - 🔄 **Automatic Synchronization**: Automatically syncs device changes from Homey (renames, room changes, deletions)
-- 📡 **Real-time Updates**: Polling-based updates every 30 seconds (Socket.IO support planned)
+- 📡 **Fast Status Updates**: Immediate status updates after changes (1-2 seconds), with background polling every 10 seconds
 - ⚙️ **Easy Setup**: Simple configuration flow through Home Assistant's UI
 - 🎯 **Smart Device Grouping**: All entities from the same device are automatically grouped under one device entry
 
@@ -36,11 +38,16 @@ Before installing the integration, you need to create an API Key in Homey:
 3. Click **New API Key**
 4. Give it a name (e.g., "Home Assistant")
 5. Select the necessary permissions:
-   - `device:read` - Required to read device states
-   - `device:write` - Required to control devices
-   - `flow:read` - Required to list Flows (optional, for Flow support)
-   - `flow:write` - Required to trigger Flows (optional, for Flow support)
+   - `device:read` - **Required** to read device states
+   - `device:write` - **Required** to control devices
+   - `flow:read` - **Required** to list Flows (needed for Flow button entities and service calls using flow names)
+   - `flow:write` - **Required** to trigger Flows (needed to actually execute Flows)
+   - `zone:read` - **Optional**, but recommended for room/area organization
 6. Copy the API Key (you won't be able to see it again!)
+
+**Notes**: 
+- If you don't grant `zone:read` permission, devices will still be imported but won't be organized by Homey rooms. They will appear without room grouping in the device selection dialog.
+- If you don't grant `flow:read` and `flow:write` permissions, Flow support will be disabled. No Flow button entities will be created, and the `homey.trigger_flow` service will not work.
 
 **Important**: Keep this API Key safe - you'll need it during the setup process!
 
@@ -168,6 +175,8 @@ Once configured, all your Homey devices will appear in Home Assistant under **Se
 
 ### Homey Flows (Automations)
 
+**Prerequisites**: Flow support requires `flow:read` and `flow:write` permissions in your API key. Without these permissions, Flow button entities will not be created and the `homey.trigger_flow` service will not work.
+
 The integration exposes your Homey Flows in two ways:
 
 #### 1. Button Entities
@@ -226,14 +235,16 @@ The integration automatically synchronizes changes made in Homey with Home Assis
 - When you move a device to a different room in Homey, the device's area in Home Assistant updates automatically
 - New areas are automatically created in Home Assistant if they don't exist
 - Room names are refreshed periodically (~5 minutes) to pick up room name changes
+- **Note**: Room organization requires `zone:read` permission in your API key. Without this permission, devices will still work but won't be organized by rooms.
 
 ### Device Deletion
 - When you delete a device in Homey, it and all its entities are automatically removed from Home Assistant
 - Cleanup occurs within ~30 seconds after deletion
 
 ### Update Frequency
-- Device states: Updated every 30 seconds via polling
-- Device names/rooms: Checked every 30 seconds
+- **Immediate Updates**: When you control a device (turn on/off, change brightness, color, etc.), the status updates immediately (1-2 seconds) by fetching the device state right after the change
+- **Background Polling**: Device states are polled every 10 seconds to catch changes made outside Home Assistant (e.g., via Homey app or physical switches)
+- Device names/rooms: Checked every 10 seconds during polling
 - Zones (rooms): Refreshed every ~5 minutes
 
 **Note**: Entity names (`_attr_name`) are set during initialization and won't update automatically. The device name in the UI will update, but individual entity names may show the old name until you reload the integration. This is a Home Assistant limitation and is acceptable for most use cases.
@@ -252,10 +263,12 @@ The integration supports devices with the following capabilities:
 **Supported Color Modes**:
 - `onoff` - Simple on/off
 - `brightness` - Dimming only
-- `hs` - Hue and saturation (full color)
+- `hs` - Hue and saturation (full color) - **Full color control now working!**
 - `color_temp` - Color temperature (warm/cool white) - Uses Kelvin scale (2000K-6500K)
 
 **Note**: HS color and color temperature modes are mutually exclusive. If both are available, HS color mode is preferred.
+
+**Color Control**: The integration automatically converts between Home Assistant's color format (hue 0-360°, saturation 0-100%) and Homey's normalized format (0-1). Color changes should work reliably for all supported lights.
 
 ### Switches
 - `onoff` - On/off control
@@ -304,6 +317,28 @@ The integration supports devices with the following capabilities:
 - `speaker_playing` - Play/pause control
 - `speaker_next` - Next track
 - `speaker_prev` - Previous track
+
+## Known Issues & Limitations
+
+### Room/Zone Detection
+- **Issue**: Rooms may not be detected if your API key doesn't have `zone:read` permission.
+- **Impact**: Devices will still be imported and work correctly, but won't be organized by rooms in the device selection dialog or assigned to areas automatically.
+- **Solution**: Add `zone:read` permission to your API key in Homey Settings → API Keys → Edit your API key.
+
+### Config Flow Window Size
+- **Issue**: The device selection dialog has a fixed size and cannot be resized or customized.
+- **Impact**: With many devices, you'll need to scroll through the list. The dialog size is controlled by Home Assistant and cannot be modified by integrations.
+- **Solution**: Use your browser's search function (Ctrl+F / Cmd+F) to quickly find devices. This is a Home Assistant framework limitation and cannot be customized by individual integrations.
+
+### Entity Name Updates
+- **Issue**: Entity names don't update automatically when device names change in Homey.
+- **Impact**: Device names in the UI will update, but individual entity names may show old names until you reload the integration.
+- **Solution**: Reload the integration after renaming devices in Homey if you want entity names to update immediately.
+
+### Socket.IO Real-time Updates
+- **Issue**: Real-time updates via Socket.IO are currently disabled due to authentication complexity.
+- **Impact**: Changes made outside Home Assistant (via Homey app or physical switches) may take up to 10 seconds to appear due to polling interval. However, changes made within Home Assistant update immediately (1-2 seconds).
+- **Solution**: This is a known limitation. The current approach provides immediate feedback for your actions while using efficient polling for external changes. Polling every 10 seconds with immediate refresh after commands provides a good balance of responsiveness and reliability.
 
 ## Troubleshooting
 
@@ -386,6 +421,17 @@ If device name or room changes made in Homey aren't appearing in Home Assistant:
 3. **Manual Refresh**: Reload the integration: **Settings** → **Devices & Services** → **Homey** → **⋮** → **Reload**
 4. **Verify Changes**: Make sure the changes were actually saved in Homey
 
+## API Reference
+
+For complete API documentation, error lookup, and troubleshooting guides, see **[API_REFERENCE.md](API_REFERENCE.md)**.
+
+This document includes:
+- Complete Homey API endpoint reference (all variations)
+- Home Assistant config flow patterns and validation
+- Common errors and solutions
+- Error lookup guide
+- Best practices
+
 ## Development
 
 ### Project Structure
@@ -465,6 +511,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Built for the Home Assistant community
 - Uses the Homey Local API by Athom
 - Inspired by the need to bridge Homey and Home Assistant ecosystems
+- Special thanks to [@PeterKawa](https://github.com/PeterKawa) for initial testing, bug reports, and feedback that helped identify and fix many issues
 - Created by one guy with too much time on his hands who couldn't sit on his ass waiting for someone else to build this 😄
 
 ## Support

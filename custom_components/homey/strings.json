@@ -8,11 +8,22 @@
           "host": "Homey IP Address or Hostname",
           "token": "API Key"
         }
+      },
+      "device_selection": {
+        "title": "Select Devices",
+        "description": "Select which devices to import into Home Assistant. All devices are selected by default. You can deselect devices you don't want to import.",
+        "data": {}
+      },
+      "device_management": {
+        "title": "Manage Devices",
+        "description": "Select which devices to include in Home Assistant. Currently selected devices are pre-checked. You can add or remove devices as needed. Changes will be applied after saving.\n\n💡 Tip: Use your browser's search (Ctrl+F / Cmd+F) to quickly find devices by name, room, or type.",
+        "data": {}
       }
     },
     "error": {
       "cannot_connect": "Unable to connect to Homey. Please check:\n- The IP address is correct\n- Homey is powered on and accessible on your network\n- The API key is valid\n- Homey API is enabled",
       "invalid_auth": "Invalid API key. Please check your API key in Homey Settings → API Keys.",
+      "cannot_fetch_devices": "Unable to fetch devices from Homey. The connection was successful but device list could not be retrieved. Proceeding with all devices.",
       "unknown": "An unexpected error occurred. Check the logs for details."
     },
     "abort": {

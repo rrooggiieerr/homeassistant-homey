@@ -89,6 +89,10 @@ async def async_setup_entry(
     entities = []
     # Use coordinator data if available (more up-to-date), otherwise fetch fresh
     devices = coordinator.data if coordinator.data else await api.get_devices()
+    
+    # Filter devices if device_filter is configured
+    from . import filter_devices
+    devices = filter_devices(devices, entry.data.get("device_filter"))
 
     for device_id, device in devices.items():
         capabilities = device.get("capabilitiesObj", {})

@@ -8,11 +8,15 @@ import aiohttp
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_TOKEN
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import DOMAIN
+from .const import CONF_DEVICE_FILTER, DOMAIN
+from .device_info import get_device_type
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -68,6 +72,7 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 
                 data = None
                 last_error = None
+                auth_errors = []  # Track 401 errors from different endpoints
                 
                 async with aiohttp.ClientSession(
                     connector=connector,
@@ -96,23 +101,40 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                             _LOGGER.warning("Failed to parse JSON from %s: %s", url, json_err)
                                         # Continue to next endpoint
                                 elif response.status == 401:
-                                    errors["base"] = "invalid_auth"
-                                    _LOGGER.error("Authentication failed with endpoint %s", endpoint)
-                                    return self.async_show_form(
-                                        step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
-                                    )
+                                    # Some endpoints may return 401 even with valid credentials
+                                    # Track it but continue trying other endpoints
+                                    auth_errors.append(endpoint)
+                                    _LOGGER.debug("Authentication failed with endpoint %s (will try other endpoints)", endpoint)
+                                    continue
                                 elif response.status == 404:
                                     _LOGGER.debug("Endpoint %s not found, trying next...", endpoint)
                                     last_error = f"Endpoint {endpoint} not found"
                                     continue
                                 else:
-                                    _LOGGER.debug("Unexpected status %s for %s: %s", response.status, url, response_text[:200])
+                                    try:
+                                        response_text = await response.text()
+                                        _LOGGER.debug("Unexpected status %s for %s: %s", response.status, url, response_text[:200])
+                                    except:
+                                        _LOGGER.debug("Unexpected status %s for %s", response.status, url)
                                     last_error = f"Status {response.status} for {endpoint}"
                                     continue
                         except Exception as err:
                             _LOGGER.debug("Error trying endpoint %s: %s", endpoint, err)
                             last_error = str(err)
                             continue
+                    
+                    # If we got data from any endpoint, proceed
+                    if data:
+                        # Success - ignore any 401 errors from other endpoints
+                        pass
+                    elif auth_errors and len(auth_errors) == len(endpoints_to_try):
+                        # ALL endpoints returned 401 - this means invalid credentials
+                        errors["base"] = "invalid_auth"
+                        _LOGGER.error("Authentication failed with all system endpoints. Check your API key.")
+                        return self.async_show_form(
+                            step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+                        )
+                    # Otherwise, continue to fallback (devices endpoint)
                     
                     # If we got data from any endpoint, proceed
                     if data:
@@ -126,14 +148,13 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         await self.async_set_unique_id(unique_id)
                         self._abort_if_unique_id_configured()
 
-                        return self.async_create_entry(
-                            title=name,
-                            data={
-                                CONF_HOST: host,
-                                CONF_TOKEN: token,
-                                "working_endpoint": working_endpoint,  # Store which worked
-                            },
-                        )
+                        # Store connection info for device selection step
+                        self.host = host
+                        self.token = token
+                        self.working_endpoint = working_endpoint
+                        
+                        # Move to device selection step
+                        return await self.async_step_device_selection()
                     else:
                         # Try devices endpoint as final fallback - if this works, API is accessible
                         _LOGGER.debug("System endpoints failed, trying devices endpoint as fallback...")
@@ -143,6 +164,8 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             "/api/v1/device/",
                             "/api/v1/device",
                         ]
+                        device_auth_errors = []
+                        
                         for device_endpoint in device_endpoints:
                             try:
                                 url = f"{host}{device_endpoint}"
@@ -160,20 +183,18 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                         # Determine which endpoint structure worked
                                         working_endpoint = "manager" if "/api/manager" in device_endpoint else "v1"
                                         
-                                        return self.async_create_entry(
-                                            title="Homey",
-                                            data={
-                                                CONF_HOST: host,
-                                                CONF_TOKEN: token,
-                                                "working_endpoint": working_endpoint,  # Store which worked
-                                            },
-                                        )
+                                        # Store connection info for device selection step
+                                        self.host = host
+                                        self.token = token
+                                        self.working_endpoint = working_endpoint
+                                        
+                                        # Move to device selection step
+                                        return await self.async_step_device_selection()
                                     elif response.status == 401:
-                                        errors["base"] = "invalid_auth"
-                                        _LOGGER.error("Authentication failed with devices endpoint %s", device_endpoint)
-                                        return self.async_show_form(
-                                            step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
-                                        )
+                                        # Track 401 but continue trying other device endpoints
+                                        device_auth_errors.append(device_endpoint)
+                                        _LOGGER.debug("Authentication failed with devices endpoint %s (will try other endpoints)", device_endpoint)
+                                        continue
                                     elif response.status == 404:
                                         _LOGGER.debug("Devices endpoint %s not found, trying next...", device_endpoint)
                                         continue
@@ -185,8 +206,18 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 continue
                         
                         # If we get here, all endpoints failed
-                        errors["base"] = "cannot_connect"
-                        _LOGGER.error("Could not connect to Homey API. Tried system endpoints: %s and device endpoints: %s. Last error: %s", endpoints_to_try, device_endpoints, last_error)
+                        # Check if we got 401 from all endpoints (both system and device)
+                        all_auth_errors = auth_errors + device_auth_errors
+                        total_endpoints_tried = len(endpoints_to_try) + len(device_endpoints)
+                        
+                        if len(all_auth_errors) == total_endpoints_tried:
+                            # ALL endpoints returned 401 - invalid credentials
+                            errors["base"] = "invalid_auth"
+                            _LOGGER.error("Authentication failed with all endpoints. Please verify your API key is correct and has the required permissions.")
+                        else:
+                            # Some endpoints returned 404 or other errors - connection issue
+                            errors["base"] = "cannot_connect"
+                            _LOGGER.error("Could not connect to Homey API. Tried system endpoints: %s and device endpoints: %s. Last error: %s", endpoints_to_try, device_endpoints, last_error)
             except aiohttp.ClientConnectorError as err:
                 errors["base"] = "cannot_connect"
                 _LOGGER.error("Connection error: %s", err)
@@ -202,5 +233,531 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+        )
+
+    async def async_step_device_selection(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle device selection step."""
+        errors: dict[str, str] = {}
+        
+        # Store device_id to display_name mapping for parsing user input
+        if not hasattr(self, "_device_id_to_display_name"):
+            self._device_id_to_display_name = {}
+        
+        # Fetch devices and zones from Homey
+        devices = {}
+        zones = {}
+        try:
+            timeout = aiohttp.ClientTimeout(total=10)
+            connector = aiohttp.TCPConnector(ssl=False)
+            
+            async with aiohttp.ClientSession(
+                connector=connector,
+                timeout=timeout,
+                headers={"Authorization": f"Bearer {self.token}"},
+            ) as session:
+                # Try to get devices
+                device_endpoints = [
+                    f"{self.host}/api/manager/devices/device/",
+                    f"{self.host}/api/manager/devices/device",
+                    f"{self.host}/api/v1/device/",
+                    f"{self.host}/api/v1/device",
+                ]
+                
+                for device_endpoint in device_endpoints:
+                    try:
+                        async with session.get(device_endpoint) as response:
+                            if response.status == 200:
+                                devices_data = await response.json()
+                                # Handle both dict and list responses
+                                if isinstance(devices_data, dict):
+                                    devices = devices_data
+                                elif isinstance(devices_data, list):
+                                    devices = {device.get("id", str(i)): device for i, device in enumerate(devices_data)}
+                                break
+                    except Exception as err:
+                        _LOGGER.debug("Error fetching devices from %s: %s", device_endpoint, err)
+                        continue
+                
+                # Try to get zones (rooms)
+                # Note: Zones may require additional API permissions (zone:read)
+                # If zones can't be fetched, we'll proceed without room grouping
+                zone_endpoints = [
+                    f"{self.host}/api/manager/zones/zone/",
+                    f"{self.host}/api/manager/zones/zone",
+                    f"{self.host}/api/v1/zone/",
+                    f"{self.host}/api/v1/zone",
+                ]
+                
+                zones_fetched = False
+                for zone_endpoint in zone_endpoints:
+                    try:
+                        async with session.get(zone_endpoint) as response:
+                            if response.status == 200:
+                                zones_data = await response.json()
+                                if isinstance(zones_data, dict):
+                                    zones = zones_data
+                                elif isinstance(zones_data, list):
+                                    zones = {zone.get("id", str(i)): zone for i, zone in enumerate(zones_data)}
+                                zones_fetched = True
+                                _LOGGER.debug("Successfully fetched zones from %s", zone_endpoint)
+                                break
+                            elif response.status == 401:
+                                _LOGGER.debug("Zones endpoint requires authentication - may need zone:read permission")
+                                continue
+                            elif response.status == 403:
+                                _LOGGER.debug("Zones endpoint forbidden - API key may not have zone:read permission")
+                                continue
+                    except Exception as err:
+                        _LOGGER.debug("Error fetching zones from %s: %s", zone_endpoint, err)
+                        continue
+                
+                if not zones_fetched:
+                    _LOGGER.info("Could not fetch zones/rooms from Homey. Devices will be shown without room grouping. This may require zone:read permission in your API key.")
+                    zones = {}
+        except Exception as err:
+            _LOGGER.error("Failed to fetch devices: %s", err)
+            errors["base"] = "cannot_fetch_devices"
+        
+        if user_input is not None:
+            # User has selected devices from multi-select
+            selected_device_ids = user_input.get(CONF_DEVICE_FILTER, [])
+            
+            # If no devices selected, import all (None means import all)
+            if not selected_device_ids:
+                selected_device_ids = None
+            
+            # Get Homey name for entry title
+            name = "Homey"
+            try:
+                timeout = aiohttp.ClientTimeout(total=10)
+                connector = aiohttp.TCPConnector(ssl=False)
+                async with aiohttp.ClientSession(
+                    connector=connector,
+                    timeout=timeout,
+                    headers={"Authorization": f"Bearer {self.token}"},
+                ) as session:
+                    for endpoint in ["/api/manager/system/info", "/api/v1/system"]:
+                        try:
+                            async with session.get(f"{self.host}{endpoint}") as response:
+                                if response.status == 200:
+                                    data = await response.json()
+                                    name = data.get("name") or data.get("homeyName") or "Homey"
+                                    break
+                        except:
+                            continue
+            except:
+                pass
+            
+            return self.async_create_entry(
+                title=name,
+                data={
+                    CONF_HOST: self.host,
+                    CONF_TOKEN: self.token,
+                    "working_endpoint": self.working_endpoint,
+                    CONF_DEVICE_FILTER: selected_device_ids,  # None means import all
+                },
+            )
+        
+        if not devices:
+            # No devices found or error - proceed without selection
+            _LOGGER.warning("No devices found or error fetching devices, proceeding with all devices")
+            return self.async_create_entry(
+                title="Homey",
+                data={
+                    CONF_HOST: self.host,
+                    CONF_TOKEN: self.token,
+                    "working_endpoint": self.working_endpoint,
+                    CONF_DEVICE_FILTER: None,  # Import all
+                },
+            )
+        
+        # Group devices by room/zone and type for better organization
+        devices_by_room_and_type: dict[str, dict[str, list[tuple[str, dict[str, Any], str]]]] = {}
+        devices_no_room_by_type: dict[str, list[tuple[str, dict[str, Any], str]]] = {}
+        
+        # Device type labels for display
+        type_labels = {
+            "light": "Light",
+            "switch": "Switch",
+            "sensor": "Sensor",
+            "binary_sensor": "Binary Sensor",
+            "cover": "Cover",
+            "climate": "Climate",
+            "fan": "Fan",
+            "lock": "Lock",
+            "media_player": "Media Player",
+            "device": "Device",
+        }
+        
+        # Check if we have zones - if not, don't group by room
+        has_zones = bool(zones)
+        
+        for device_id, device in devices.items():
+            capabilities = device.get("capabilitiesObj", {})
+            device_type = get_device_type(capabilities)
+            type_label = type_labels.get(device_type, "Device")
+            zone_id = device.get("zone")
+            
+            # Only group by room if we have zones AND device has a zone
+            if has_zones and zone_id and zone_id in zones:
+                zone_name = zones[zone_id].get("name", "Unknown Room")
+                if zone_name not in devices_by_room_and_type:
+                    devices_by_room_and_type[zone_name] = {}
+                if device_type not in devices_by_room_and_type[zone_name]:
+                    devices_by_room_and_type[zone_name][device_type] = []
+                devices_by_room_and_type[zone_name][device_type].append((device_id, device, type_label))
+            else:
+                # Device has no room or zones couldn't be fetched
+                if device_type not in devices_no_room_by_type:
+                    devices_no_room_by_type[device_type] = []
+                devices_no_room_by_type[device_type].append((device_id, device, type_label))
+        
+        # Build device options dict for multi-select (cv.multi_select works with voluptuous_serialize)
+        # Format: {device_id: "Room • Type • Device Name"}
+        device_options: dict[str, str] = {}
+        
+        # Device type order for consistent sorting (most common first)
+        type_order = ["light", "switch", "cover", "climate", "fan", "lock", "media_player", "sensor", "binary_sensor", "device"]
+        
+        # Build options dict grouped by room, then by type (sorted alphabetically)
+        for room_name in sorted(devices_by_room_and_type.keys()):
+            room_types = devices_by_room_and_type[room_name]
+            # Sort types by our preferred order, then alphabetically
+            sorted_types = sorted(
+                room_types.keys(),
+                key=lambda t: (type_order.index(t) if t in type_order else 999, t)
+            )
+            
+            for device_type in sorted_types:
+                room_devices = sorted(
+                    room_types[device_type],
+                    key=lambda x: x[1].get("name", "").lower()
+                )
+                
+                for device_id, device, type_label in room_devices:
+                    device_name = device.get("name", f"Device {device_id}")
+                    # Create display name with room (if available), type, and device name
+                    if room_name and room_name != "Unknown Room":
+                        display_name = f"{room_name} • {type_label} • {device_name}"
+                    else:
+                        display_name = f"{type_label} • {device_name}"
+                    device_options[device_id] = display_name
+        
+        # Add devices without room, grouped by type
+        if devices_no_room_by_type:
+            sorted_no_room_types = sorted(
+                devices_no_room_by_type.keys(),
+                key=lambda t: (type_order.index(t) if t in type_order else 999, t)
+            )
+            
+            for device_type in sorted_no_room_types:
+                type_label = type_labels.get(device_type, "Device")
+                devices_no_room_sorted = sorted(
+                    devices_no_room_by_type[device_type],
+                    key=lambda x: x[1].get("name", "").lower()
+                )
+                
+                for device_id, device, type_label_actual in devices_no_room_sorted:
+                    device_name = device.get("name", f"Device {device_id}")
+                    # Only show "No Room" if we successfully fetched zones but device has no room
+                    if zones:
+                        display_name = f"No Room • {type_label_actual} • {device_name}"
+                    else:
+                        display_name = f"{type_label_actual} • {device_name}"
+                    device_options[device_id] = display_name
+        
+        # Use cv.multi_select for device selection - this works with voluptuous_serialize
+        # Default to all devices selected
+        default_selected = list(device_options.keys())
+        
+        device_schema = vol.Schema({
+            vol.Optional(
+                CONF_DEVICE_FILTER,
+                default=default_selected
+            ): cv.multi_select(device_options),
+        })
+        
+        return self.async_show_form(
+            step_id="device_selection",
+            data_schema=device_schema,
+            errors=errors,
+            description_placeholders={
+                "device_count": str(len(devices)),
+                "room_count": str(len(devices_by_room_and_type)),
+            },
+        )
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> config_entries.OptionsFlow:
+        """Get the options flow for this handler."""
+        return HomeyOptionsFlowHandler(config_entry)
+
+
+class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
+    """Handle options flow for Homey integration."""
+
+    def __init__(self, config_entry: ConfigEntry) -> None:
+        """Initialize options flow."""
+        # OptionsFlow's config_entry property is set by the framework
+        # We need to call super().__init__() first, but OptionsFlow doesn't take config_entry
+        # Store it in a private variable and use self.config_entry property after init
+        super().__init__()
+        # Store config entry data in instance variables for easy access
+        # Note: self.config_entry is a property set by the framework, but we need
+        # to store the passed config_entry for use in our methods
+        self._entry = config_entry
+        self.host = config_entry.data[CONF_HOST]
+        self.token = config_entry.data[CONF_TOKEN]
+        self.working_endpoint = config_entry.data.get("working_endpoint")
+        self._device_id_to_display_name: dict[str, str] = {}
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Manage the options."""
+        return await self.async_step_device_management()
+
+    async def async_step_device_management(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle device management step."""
+        errors: dict[str, str] = {}
+        
+        # Get currently selected devices from config entry
+        current_selected = self._entry.data.get(CONF_DEVICE_FILTER)
+        if current_selected is None:
+            # None means all devices are selected
+            current_selected_set: set[str] = set()
+        else:
+            current_selected_set = set(current_selected)
+        
+        # Fetch devices and zones from Homey
+        devices = {}
+        zones = {}
+        try:
+            timeout = aiohttp.ClientTimeout(total=10)
+            connector = aiohttp.TCPConnector(ssl=False)
+            
+            async with aiohttp.ClientSession(
+                connector=connector,
+                timeout=timeout,
+                headers={"Authorization": f"Bearer {self.token}"},
+            ) as session:
+                # Try to get devices
+                device_endpoints = [
+                    f"{self.host}/api/manager/devices/device/",
+                    f"{self.host}/api/manager/devices/device",
+                    f"{self.host}/api/v1/device/",
+                    f"{self.host}/api/v1/device",
+                ]
+                
+                for device_endpoint in device_endpoints:
+                    try:
+                        async with session.get(device_endpoint) as response:
+                            if response.status == 200:
+                                devices_data = await response.json()
+                                # Handle both dict and list responses
+                                if isinstance(devices_data, dict):
+                                    devices = devices_data
+                                elif isinstance(devices_data, list):
+                                    devices = {device.get("id", str(i)): device for i, device in enumerate(devices_data)}
+                                break
+                    except Exception as err:
+                        _LOGGER.debug("Error fetching devices from %s: %s", device_endpoint, err)
+                        continue
+                
+                # Try to get zones (rooms)
+                # Note: Zones may require additional API permissions (zone:read)
+                # If zones can't be fetched, we'll proceed without room grouping
+                zone_endpoints = [
+                    f"{self.host}/api/manager/zones/zone/",
+                    f"{self.host}/api/manager/zones/zone",
+                    f"{self.host}/api/v1/zone/",
+                    f"{self.host}/api/v1/zone",
+                ]
+                
+                zones_fetched = False
+                for zone_endpoint in zone_endpoints:
+                    try:
+                        async with session.get(zone_endpoint) as response:
+                            if response.status == 200:
+                                zones_data = await response.json()
+                                if isinstance(zones_data, dict):
+                                    zones = zones_data
+                                elif isinstance(zones_data, list):
+                                    zones = {zone.get("id", str(i)): zone for i, zone in enumerate(zones_data)}
+                                zones_fetched = True
+                                _LOGGER.debug("Successfully fetched zones from %s", zone_endpoint)
+                                break
+                            elif response.status == 401:
+                                _LOGGER.debug("Zones endpoint requires authentication - may need zone:read permission")
+                                continue
+                            elif response.status == 403:
+                                _LOGGER.debug("Zones endpoint forbidden - API key may not have zone:read permission")
+                                continue
+                    except Exception as err:
+                        _LOGGER.debug("Error fetching zones from %s: %s", zone_endpoint, err)
+                        continue
+                
+                if not zones_fetched:
+                    _LOGGER.info("Could not fetch zones/rooms from Homey. Devices will be shown without room grouping. This may require zone:read permission in your API key.")
+                    zones = {}
+        except Exception as err:
+            _LOGGER.error("Failed to fetch devices: %s", err)
+            errors["base"] = "cannot_fetch_devices"
+        
+        if user_input is not None:
+            # User has selected devices from multi-select
+            selected_device_ids = user_input.get(CONF_DEVICE_FILTER, [])
+            
+            # If no devices selected, import all (None means import all)
+            if not selected_device_ids:
+                selected_device_ids = None
+            
+            # Update config entry with new device selection
+            new_data = {**self._entry.data}
+            new_data[CONF_DEVICE_FILTER] = selected_device_ids
+            
+            # Update the config entry
+            self.hass.config_entries.async_update_entry(
+                self._entry,
+                data=new_data,
+            )
+            
+            # Reload the integration to apply changes
+            await self.hass.config_entries.async_reload(self._entry.entry_id)
+            
+            return self.async_create_entry(title="", data={})
+        
+        if not devices:
+            # No devices found or error - show error
+            errors["base"] = "cannot_fetch_devices"
+            return self.async_show_form(
+                step_id="device_management",
+                errors=errors,
+            )
+        
+        # Group devices by room/zone and type for better organization
+        devices_by_room_and_type: dict[str, dict[str, list[tuple[str, dict[str, Any], str]]]] = {}
+        devices_no_room_by_type: dict[str, list[tuple[str, dict[str, Any], str]]] = {}
+        
+        # Device type labels for display
+        type_labels = {
+            "light": "Light",
+            "switch": "Switch",
+            "sensor": "Sensor",
+            "binary_sensor": "Binary Sensor",
+            "cover": "Cover",
+            "climate": "Climate",
+            "fan": "Fan",
+            "lock": "Lock",
+            "media_player": "Media Player",
+            "device": "Device",
+        }
+        
+        # Check if we have zones - if not, don't group by room
+        has_zones = bool(zones)
+        
+        for device_id, device in devices.items():
+            capabilities = device.get("capabilitiesObj", {})
+            device_type = get_device_type(capabilities)
+            type_label = type_labels.get(device_type, "Device")
+            zone_id = device.get("zone")
+            
+            # Only group by room if we have zones AND device has a zone
+            if has_zones and zone_id and zone_id in zones:
+                zone_name = zones[zone_id].get("name", "Unknown Room")
+                if zone_name not in devices_by_room_and_type:
+                    devices_by_room_and_type[zone_name] = {}
+                if device_type not in devices_by_room_and_type[zone_name]:
+                    devices_by_room_and_type[zone_name][device_type] = []
+                devices_by_room_and_type[zone_name][device_type].append((device_id, device, type_label))
+            else:
+                # Device has no room or zones couldn't be fetched
+                if device_type not in devices_no_room_by_type:
+                    devices_no_room_by_type[device_type] = []
+                devices_no_room_by_type[device_type].append((device_id, device, type_label))
+        
+        # Build device options dict for multi-select (cv.multi_select works with voluptuous_serialize)
+        # Format: {device_id: "Room • Type • Device Name"}
+        device_options: dict[str, str] = {}
+        
+        # Device type order for consistent sorting (most common first)
+        type_order = ["light", "switch", "cover", "climate", "fan", "lock", "media_player", "sensor", "binary_sensor", "device"]
+        
+        # Build options dict grouped by room, then by type (sorted alphabetically)
+        for room_name in sorted(devices_by_room_and_type.keys()):
+            room_types = devices_by_room_and_type[room_name]
+            # Sort types by our preferred order, then alphabetically
+            sorted_types = sorted(
+                room_types.keys(),
+                key=lambda t: (type_order.index(t) if t in type_order else 999, t)
+            )
+            
+            for device_type in sorted_types:
+                room_devices = sorted(
+                    room_types[device_type],
+                    key=lambda x: x[1].get("name", "").lower()
+                )
+                
+                for device_id, device, type_label in room_devices:
+                    device_name = device.get("name", f"Device {device_id}")
+                    # Create display name with room (if available), type, and device name
+                    if room_name and room_name != "Unknown Room":
+                        display_name = f"{room_name} • {type_label} • {device_name}"
+                    else:
+                        display_name = f"{type_label} • {device_name}"
+                    device_options[device_id] = display_name
+        
+        # Add devices without room, grouped by type
+        if devices_no_room_by_type:
+            sorted_no_room_types = sorted(
+                devices_no_room_by_type.keys(),
+                key=lambda t: (type_order.index(t) if t in type_order else 999, t)
+            )
+            
+            for device_type in sorted_no_room_types:
+                type_label = type_labels.get(device_type, "Device")
+                devices_no_room_sorted = sorted(
+                    devices_no_room_by_type[device_type],
+                    key=lambda x: x[1].get("name", "").lower()
+                )
+                
+                for device_id, device, type_label_actual in devices_no_room_sorted:
+                    device_name = device.get("name", f"Device {device_id}")
+                    # Only show "No Room" if we successfully fetched zones but device has no room
+                    if zones:
+                        display_name = f"No Room • {type_label_actual} • {device_name}"
+                    else:
+                        display_name = f"{type_label_actual} • {device_name}"
+                    device_options[device_id] = display_name
+        
+        # Determine default selection based on current config
+        if current_selected is None:
+            # All devices selected by default
+            default_selected = list(device_options.keys())
+        else:
+            # Only currently selected devices
+            default_selected = [did for did in current_selected if did in device_options]
+        
+        # Use cv.multi_select for device selection - this works with voluptuous_serialize
+        device_schema = vol.Schema({
+            vol.Optional(
+                CONF_DEVICE_FILTER,
+                default=default_selected
+            ): cv.multi_select(device_options),
+        })
+        
+        return self.async_show_form(
+            step_id="device_management",
+            data_schema=device_schema,
+            errors=errors,
+            description_placeholders={
+                "device_count": str(len(devices)),
+                "room_count": str(len(devices_by_room_and_type)),
+            },
         )
 

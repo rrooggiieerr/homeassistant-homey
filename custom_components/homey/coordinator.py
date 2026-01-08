@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN
+from .const import CONF_DEVICE_FILTER, DOMAIN
 from .homey_api import HomeyAPI
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     ) -> None:
         """Initialize the coordinator."""
         if update_interval is None:
-            update_interval = timedelta(seconds=30)
+            update_interval = timedelta(seconds=10)  # Reduced from 30s to 10s for better responsiveness
         
         super().__init__(
             hass,
@@ -74,6 +74,50 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return devices
         except Exception as err:
             raise UpdateFailed(f"Error communicating with Homey: {err}") from err
+
+    async def _assign_areas_to_devices(self) -> None:
+        """Assign areas to devices based on Homey zones during initial setup."""
+        if not self.data:
+            return
+        
+        device_registry = dr.async_get(self.hass)
+        from homeassistant.helpers import area_registry as ar
+        area_registry = ar.async_get(self.hass)
+        
+        for device_id, device in self.data.items():
+            device_entry = device_registry.async_get_device(
+                identifiers={(DOMAIN, device_id)}, connections=set()
+            )
+            
+            if not device_entry:
+                continue
+            
+            # Get zone/room information
+            zone_id = device.get("zone")
+            room_name = None
+            if zone_id and self.zones:
+                zone = self.zones.get(zone_id)
+                if zone:
+                    room_name = zone.get("name")
+            
+            # Assign area if room exists
+            if room_name:
+                # Find or create area
+                area = area_registry.async_get_area_by_name(room_name)
+                if area:
+                    area_id = area.id
+                else:
+                    # Create new area
+                    area = area_registry.async_create(room_name)
+                    area_id = area.id
+                
+                # Assign area to device if not already assigned
+                if device_entry.area_id != area_id:
+                    device_registry.async_update_device(
+                        device_entry.id,
+                        area_id=area_id,
+                    )
+                    _LOGGER.debug("Assigned device %s to area: %s", device_entry.name, room_name)
 
     async def _update_device_registry(self, devices: dict[str, dict[str, Any]]) -> None:
         """Update device registry when device names or rooms change."""
@@ -145,6 +189,70 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 # Remove the device
                 device_registry.async_remove_device(device_entry.id)
                 _LOGGER.info("Removed deleted device: %s", device_id)
+    
+    async def _remove_unselected_devices(self, entry: Any) -> None:
+        """Remove devices that are no longer in device_filter from device registry.
+        
+        This is called during setup to clean up devices that were removed from
+        the device_filter via the options flow or manual deletion.
+        """
+        from homeassistant.config_entries import ConfigEntry
+        
+        if not isinstance(entry, ConfigEntry):
+            return
+        
+        device_filter = entry.data.get(CONF_DEVICE_FILTER)
+        
+        # If device_filter is None, all devices are selected, so nothing to remove
+        if device_filter is None:
+            return
+        
+        device_filter_set = set(device_filter)
+        device_registry = dr.async_get(self.hass)
+        from homeassistant.helpers import entity_registry as er
+        entity_registry = er.async_get(self.hass)
+        
+        # Get all devices for this integration
+        # We need to check devices that belong to this config entry
+        devices_to_remove = []
+        
+        # Get all devices and check which ones belong to our integration
+        for device_entry in device_registry.devices.values():
+            # Check if this device belongs to our integration and this config entry
+            for identifier in device_entry.identifiers:
+                if identifier[0] == DOMAIN:
+                    device_id = identifier[1]
+                    # Check if this device is associated with our config entry
+                    # and if it's not in the filter
+                    if device_id not in device_filter_set:
+                        # Verify this device belongs to our config entry
+                        # by checking if it's in the coordinator data or was previously tracked
+                        if device_id not in (self.data or {}):
+                            # Device not in current data, might be stale
+                            # But only remove if it's definitely not in filter
+                            devices_to_remove.append((device_entry.id, device_id))
+                    break
+        
+        # Remove devices and their entities
+        for device_entry_id, device_id in devices_to_remove:
+            device_entry = device_registry.async_get(device_entry_id)
+            if device_entry:
+                # Verify this device still belongs to our integration
+                still_ours = False
+                for identifier in device_entry.identifiers:
+                    if identifier[0] == DOMAIN and identifier[1] == device_id:
+                        still_ours = True
+                        break
+                
+                if still_ours:
+                    # Remove all entities for this device
+                    entities = entity_registry.async_entries_for_device(device_entry_id)
+                    for entity_entry in entities:
+                        entity_registry.async_remove(entity_entry.entity_id)
+                    
+                    # Remove the device
+                    device_registry.async_remove_device(device_entry_id)
+                    _LOGGER.info("Removed unselected device from registry: %s", device_id)
 
     def _on_device_update(self, device_id: str, data: dict[str, Any]) -> None:
         """Handle device update from Socket.IO."""
@@ -156,4 +264,23 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 self.data[device_id] = data
             # Notify listeners
             self.async_update_listeners()
+    
+    async def async_refresh_device(self, device_id: str) -> None:
+        """Immediately refresh a specific device's state from Homey API.
+        
+        This is called after setting a capability value to get immediate feedback
+        instead of waiting for the next polling interval.
+        """
+        try:
+            device_data = await self.api.get_device(device_id)
+            if device_data and self.data:
+                # Update the device data in coordinator
+                self.data[device_id] = device_data
+                # Notify listeners immediately
+                self.async_update_listeners()
+                _LOGGER.debug("Immediately refreshed device %s", device_id)
+        except Exception as err:
+            _LOGGER.debug("Error refreshing device %s: %s", device_id, err)
+            # Fall back to regular refresh request
+            await self.async_request_refresh()
 

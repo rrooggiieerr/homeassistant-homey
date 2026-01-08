@@ -30,6 +30,10 @@ async def async_setup_entry(
     entities = []
     # Use coordinator data if available (more up-to-date), otherwise fetch fresh
     devices = coordinator.data if coordinator.data else await api.get_devices()
+    
+    # Filter devices if device_filter is configured
+    from . import filter_devices
+    devices = filter_devices(devices, entry.data.get("device_filter"))
 
     for device_id, device in devices.items():
         capabilities = device.get("capabilitiesObj", {})
@@ -106,7 +110,8 @@ class HomeyFan(CoordinatorEntity, FanEntity):
                 self._device_id, "fan_speed", percentage / 100.0
             )
 
-        await self.coordinator.async_request_refresh()
+        # Immediately refresh this device's state for instant UI feedback
+        await self.coordinator.async_refresh_device(self._device_id)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off the fan."""
@@ -115,7 +120,8 @@ class HomeyFan(CoordinatorEntity, FanEntity):
         elif "fan_speed" in self._device.get("capabilitiesObj", {}):
             await self._api.set_capability_value(self._device_id, "fan_speed", 0.0)
 
-        await self.coordinator.async_request_refresh()
+        # Immediately refresh this device's state for instant UI feedback
+        await self.coordinator.async_refresh_device(self._device_id)
 
     async def async_set_percentage(self, percentage: int) -> None:
         """Set the speed percentage of the fan."""
@@ -123,5 +129,6 @@ class HomeyFan(CoordinatorEntity, FanEntity):
             await self._api.set_capability_value(
                 self._device_id, "fan_speed", percentage / 100.0
             )
-            await self.coordinator.async_request_refresh()
+            # Immediately refresh this device's state for instant UI feedback
+            await self.coordinator.async_refresh_device(self._device_id)
 
