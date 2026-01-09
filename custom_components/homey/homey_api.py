@@ -255,7 +255,7 @@ class HomeyAPI:
                         f"{self.host}{endpoint}",
                         json={"value": converted_value},
                     ) as response:
-                        if response.status == 200:
+                        if response.status == 200 or response.status == 204:
                             _LOGGER.debug("Successfully set capability %s=%s on device %s via %s", capability_id, converted_value, device_id, endpoint)
                             return True
                         elif response.status == 404:
@@ -284,7 +284,7 @@ class HomeyAPI:
                         f"{self.host}{endpoint}",
                         json={"value": converted_value},
                     ) as response:
-                        if response.status == 200:
+                        if response.status == 200 or response.status == 204:
                             _LOGGER.debug("Successfully set capability %s=%s on device %s via %s", capability_id, converted_value, device_id, endpoint)
                             return True
                         elif response.status == 404:
@@ -297,7 +297,7 @@ class HomeyAPI:
                             continue
                         else:
                             error_text = await response.text()
-                            _LOGGER.info(
+                            _LOGGER.debug(
                                 "Failed to set capability %s=%s on device %s via %s (%s): %s - %s",
                                 capability_id,
                                 converted_value,
@@ -309,7 +309,7 @@ class HomeyAPI:
                             )
                             continue
             except Exception as err:
-                _LOGGER.info(
+                _LOGGER.debug(
                     "Exception setting capability %s=%s on device %s via %s (%s): %s",
                     capability_id,
                     converted_value,
