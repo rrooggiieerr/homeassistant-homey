@@ -233,36 +233,37 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
         try:
             if not isinstance(temperature, (int, float)):
                 temperature = float(temperature)
-            
-            _LOGGER.debug(
-                "Setting target temperature to %s for device %s (%s)",
+        except (ValueError, TypeError):
+            _LOGGER.error(
+                "Invalid temperature value: %s for device %s",
+                temperature, self._device_id
+            )
+            return
+        
+        _LOGGER.debug(
+            "Setting target temperature to %s for device %s (%s)",
+            temperature, self._device_id, self._attr_name
+        )
+        
+        # Set the capability value and check if it succeeded
+        success = await self._api.set_capability_value(
+            self._device_id, "target_temperature", temperature
+        )
+        
+        if success:
+            _LOGGER.info(
+                "Successfully set target temperature to %s°C for device %s (%s)",
                 temperature, self._device_id, self._attr_name
             )
-            
-            # Set the capability value and check if it succeeded
-            success = await self._api.set_capability_value(
-                self._device_id, "target_temperature", temperature
-            )
-            
-            if success:
-                _LOGGER.info(
-                    "Successfully set target temperature to %s°C for device %s (%s)",
-                    temperature, self._device_id, self._attr_name
-                )
-                # Immediately refresh this device's state for instant UI feedback
-                await self.coordinator.async_refresh_device(self._device_id)
-            else:
-                _LOGGER.error(
-                    "Failed to set target temperature to %s°C for device %s (%s). "
-                    "Check API permissions (homey.device.control) and device capabilities.",
-                    temperature,
-                    self._device_id,
-                    self._attr_name,
-                )
-        except (ValueError, TypeError) as err:
+            # Immediately refresh this device's state for instant UI feedback
+            await self.coordinator.async_refresh_device(self._device_id)
+        else:
             _LOGGER.error(
-                "Invalid temperature value: %s (%s) for device %s",
-                temperature, err, self._device_id
+                "Failed to set target temperature to %s°C for device %s (%s). "
+                "Check API permissions (homey.device.control) and device capabilities.",
+                temperature,
+                self._device_id,
+                self._attr_name,
             )
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:

@@ -79,7 +79,7 @@ async def async_setup_entry(
                     continue
                 entities.append(HomeyDeviceButton(coordinator, device_id, device, capability_id, api, zones))
                 device_buttons_count += 1
-    
+
     if entities:
         _LOGGER.info(
             "Created %d Homey button entities (%d flow buttons from %d total flows, %d device buttons)",
