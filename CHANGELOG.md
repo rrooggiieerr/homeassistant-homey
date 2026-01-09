@@ -13,6 +13,17 @@ _No unreleased changes yet._
 
 ---
 
+## [1.1.1] - 2026-01-11
+
+### Added
+- **Migration Guide** - Added comprehensive migration instructions for users switching from manual installation to HACS
+- **Installation Conflict Detection** - Integration now detects and warns about conflicting installation methods (manual + HACS)
+
+### Fixed
+- Improved detection of installation method conflicts to prevent update issues
+
+---
+
 ## [1.1.0] - 2026-01-11
 
 ### 🎉 Major Feature Release: Scenes, Moods, and Enhanced Platforms
