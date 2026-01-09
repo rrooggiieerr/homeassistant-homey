@@ -19,7 +19,8 @@ API_DEVICES = f"{API_BASE_MANAGER}/devices/device/"  # Manager API structure wit
 API_DEVICES_NO_SLASH = f"{API_BASE_MANAGER}/devices/device"  # Without trailing slash
 API_DEVICES_V1 = f"{API_BASE_V1}/device"  # Fallback v1 structure
 API_CAPABILITIES = f"{API_BASE_MANAGER}/capabilities/capability"
-API_FLOWS = f"{API_BASE_MANAGER}/flows/flow"
+API_FLOWS = f"{API_BASE_MANAGER}/flow/flow"  # Standard flows: singular "flow" not "flows"
+API_ADVANCED_FLOWS = f"{API_BASE_MANAGER}/flow/advancedflow"  # Advanced flows endpoint
 API_ZONES = f"{API_BASE_MANAGER}/zones/zone"  # Rooms/zones in Homey
 
 # Device capability mappings to HA platforms

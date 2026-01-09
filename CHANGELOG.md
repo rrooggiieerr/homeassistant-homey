@@ -13,6 +13,38 @@ _No unreleased changes yet._
 
 ---
 
+## [1.0.2] - 2026-01-09
+
+### 🚀 Major Fix: Flow Support for Homey Pro 2026
+
+**This version fixes critical issues with flow discovery and triggering, and adds support for Advanced Flows.**
+
+### Fixed
+- **Fixed flow endpoint bug** - Changed from incorrect `/api/manager/flows/flow` (plural) to correct `/api/manager/flow/flow` (singular) per Homey API v3 documentation
+- **Fixed flow discovery** - Flows now properly appear as button entities in Home Assistant
+- **Fixed flow triggering** - Both Standard and Advanced Flows can now be triggered successfully
+
+### Added
+- **Advanced Flows support** - Added support for Homey Advanced Flows using `/api/manager/flow/advancedflow` endpoint
+- **Improved flow discovery** - Now fetches both Standard and Advanced Flows separately and combines them
+- **Case-insensitive flow name matching** - Flow names can now be matched regardless of case when using service calls
+- **Update guide** - Added comprehensive update instructions to README
+
+### Changed
+- **Reduced verbose logging** - Removed excessive debug logs for cleaner production logs
+- **Improved flow error messages** - Better error messages when flows are not found, including list of available flows
+- **Enhanced flow triggering** - Automatically uses correct endpoint (standard vs advanced) based on flow type
+
+### Technical Details
+- Standard Flows: `/api/manager/flow/flow` endpoint
+- Advanced Flows: `/api/manager/flow/advancedflow` endpoint
+- Flow type detection: Automatically marks flows as "standard" or "advanced" for correct endpoint usage
+- Flow name matching: Now supports both exact match and case-insensitive matching
+
+**Impact**: This fix resolves issues where flows were not appearing or could not be triggered, especially on Homey Pro 2026. All users with flows should update to this version.
+
+---
+
 ## [1.0.1] - 2026-01-08
 
 ### 🎨 Major Fix: Light Color Control

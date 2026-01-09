@@ -27,12 +27,16 @@ async def async_setup_entry(
 
     entities = []
     flows = await api.get_flows()
-
+    
     for flow_id, flow in flows.items():
+        flow_enabled = flow.get("enabled", False)
+        
         # Only include enabled flows that can be triggered
-        if flow.get("enabled", False):
+        if flow_enabled:
             entities.append(HomeyFlowButton(coordinator, flow_id, flow, api))
 
+    if entities:
+        _LOGGER.info("Created %d Homey flow button entities", len(entities))
     async_add_entities(entities)
 
 
@@ -65,8 +69,6 @@ class HomeyFlowButton(CoordinatorEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Handle the button press - trigger the Homey flow."""
         success = await self._api.trigger_flow(self._flow_id)
-        if success:
-            _LOGGER.info("Triggered Homey flow: %s", self._attr_name)
-        else:
+        if not success:
             _LOGGER.error("Failed to trigger Homey flow: %s", self._attr_name)
 

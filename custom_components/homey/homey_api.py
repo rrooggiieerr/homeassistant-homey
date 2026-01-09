@@ -15,6 +15,7 @@ from .const import (
     API_DEVICES_NO_SLASH,
     API_DEVICES_V1,
     API_FLOWS,
+    API_ADVANCED_FLOWS,
     API_SYSTEM,
     API_ZONES,
 )
@@ -407,17 +408,26 @@ class HomeyAPI:
         return None
 
     async def get_flows(self) -> dict[str, dict[str, Any]]:
-        """Get all flows from Homey."""
+        """Get all flows from Homey (both Standard and Advanced Flows)."""
         if not self.session:
             return {}
 
-        # Try manager API first, then fallback to v1
+        self.flows = {}
+        
+        # First, get Standard Flows from /api/manager/flow/flow
         endpoints_to_try = [
-            API_FLOWS,  # /api/manager/flows/flow
+            API_FLOWS,  # /api/manager/flow/flow (correct endpoint per API docs)
             f"{API_FLOWS}/",  # With trailing slash
+            # Fallback variations (in case API structure varies)
+            f"{API_BASE_MANAGER}/flows/flow",  # /api/manager/flows/flow (plural - old/incorrect)
+            f"{API_BASE_MANAGER}/flows/flow/",  # With trailing slash
             f"{API_BASE_V1}/flow",  # /api/v1/flow
+            f"{API_BASE_V1}/flow/",  # With trailing slash
         ]
 
+        auth_error_count = 0
+        standard_flows_found = False
+        
         for endpoint in endpoints_to_try:
             try:
                 async with self.session.get(f"{self.host}{endpoint}") as response:
@@ -425,97 +435,148 @@ class HomeyAPI:
                         flows_data = await response.json()
                         # Handle both array and object responses
                         if isinstance(flows_data, dict):
-                            self.flows = flows_data
+                            standard_flows = flows_data
                         else:
                             # If it's an array, convert to dict keyed by id
-                            self.flows = {flow["id"]: flow for flow in flows_data}
-                        _LOGGER.info("Successfully retrieved flows using endpoint: %s", endpoint)
-                        return self.flows
+                            standard_flows = {flow["id"]: flow for flow in flows_data}
+                        
+                        # Mark as standard flows and add to collection
+                        for fid, flow in standard_flows.items():
+                            flow["_flow_type"] = "standard"  # Mark as standard flow
+                            self.flows[fid] = flow
+                        
+                        standard_flows_found = True
+                        break
+                    elif response.status == 401:
+                        auth_error_count += 1
+                        _LOGGER.warning("Authentication failed (401) for flows endpoint %s - check flow:read permission", endpoint)
+                        continue
+                    elif response.status == 403:
+                        auth_error_count += 1
+                        _LOGGER.warning("Forbidden (403) for flows endpoint %s - check flow:read permission", endpoint)
+                        continue
                     elif response.status == 404:
-                        _LOGGER.debug("Flows endpoint %s not found, trying next...", endpoint)
                         continue
                     else:
-                        _LOGGER.debug("Failed to get flows from %s: %s", endpoint, response.status)
                         continue
             except Exception as err:
-                _LOGGER.debug("Error getting flows from %s: %s", endpoint, err)
                 continue
-
-        # Flows are optional - user may not have flow:read permission or flows may not be available
-        _LOGGER.debug("Flows not available (this is normal if flow:read permission is missing)")
+        
+        # Now get Advanced Flows from /api/manager/flow/advancedflow
+        advanced_endpoints_to_try = [
+            API_ADVANCED_FLOWS,  # /api/manager/flow/advancedflow
+            f"{API_ADVANCED_FLOWS}/",  # With trailing slash
+        ]
+        
+        advanced_flows_found = False
+        for endpoint in advanced_endpoints_to_try:
+            try:
+                async with self.session.get(f"{self.host}{endpoint}") as response:
+                    if response.status == 200:
+                        flows_data = await response.json()
+                        # Handle both array and object responses
+                        if isinstance(flows_data, dict):
+                            advanced_flows = flows_data
+                        else:
+                            # If it's an array, convert to dict keyed by id
+                            advanced_flows = {flow["id"]: flow for flow in flows_data}
+                        
+                        # Mark as advanced flows and add to collection
+                        for fid, flow in advanced_flows.items():
+                            flow["_flow_type"] = "advanced"  # Mark as advanced flow
+                            self.flows[fid] = flow
+                        
+                        advanced_flows_found = True
+                        break
+                    elif response.status == 401:
+                        auth_error_count += 1
+                        _LOGGER.warning("Authentication failed (401) for advanced flows endpoint %s - check flow:read permission", endpoint)
+                        continue
+                    elif response.status == 403:
+                        auth_error_count += 1
+                        _LOGGER.warning("Forbidden (403) for advanced flows endpoint %s - check flow:read permission", endpoint)
+                        continue
+                    elif response.status == 404:
+                        continue
+                    else:
+                        continue
+            except Exception as err:
+                continue
+        
+        if self.flows:
+            return self.flows
+        
+        # If all endpoints returned 401/403, it's a permission issue
+        if auth_error_count > 0:
+            _LOGGER.error("All flows endpoints returned authentication errors (401/403). Please check that your API key has 'flow:read' permission enabled in Homey Settings → API Keys.")
         return {}
 
     async def trigger_flow(self, flow_id: str) -> bool:
-        """Trigger a flow by ID."""
+        """Trigger a flow by ID (supports both Standard and Advanced Flows)."""
         if not self.session:
             return False
 
-        # Try different endpoints and HTTP methods
-        # Homey API might use POST to /trigger or PUT to /run
-        endpoints_to_try = [
-            (f"{API_FLOWS}/{flow_id}/trigger", "POST"),  # /api/manager/flows/flow/{id}/trigger
-            (f"{API_FLOWS}/{flow_id}/run", "PUT"),  # /api/manager/flows/flow/{id}/run
-            (f"{API_FLOWS}/{flow_id}/run", "POST"),  # POST to /run
-            (f"{API_BASE_V1}/flow/{flow_id}/trigger", "POST"),  # /api/v1/flow/{id}/trigger
-            (f"{API_BASE_V1}/flow/{flow_id}/run", "PUT"),  # /api/v1/flow/{id}/run
-        ]
+        # Check if this is an Advanced Flow by looking it up in our flows cache
+        flow_type = None
+        if flow_id in self.flows:
+            flow_type = self.flows[flow_id].get("_flow_type")
+        
+        # Build endpoints to try based on flow type
+        endpoints_to_try = []
+        
+        if flow_type == "advanced":
+            # Advanced Flows use: POST /api/manager/flow/advancedflow/:id/trigger
+            endpoints_to_try = [
+                (f"{API_ADVANCED_FLOWS}/{flow_id}/trigger", "POST"),  # /api/manager/flow/advancedflow/{id}/trigger
+                (f"{API_ADVANCED_FLOWS}/{flow_id}/trigger/", "POST"),  # With trailing slash
+            ]
+        elif flow_type == "standard":
+            # Standard Flows use: POST /api/manager/flow/flow/:id/trigger
+            endpoints_to_try = [
+                (f"{API_FLOWS}/{flow_id}/trigger", "POST"),  # /api/manager/flow/flow/{id}/trigger
+                (f"{API_FLOWS}/{flow_id}/trigger/", "POST"),  # With trailing slash
+            ]
+        else:
+            # Unknown type - try both endpoints
+            endpoints_to_try = [
+                (f"{API_FLOWS}/{flow_id}/trigger", "POST"),  # Standard flow endpoint
+                (f"{API_FLOWS}/{flow_id}/trigger/", "POST"),  # With trailing slash
+                (f"{API_ADVANCED_FLOWS}/{flow_id}/trigger", "POST"),  # Advanced flow endpoint
+                (f"{API_ADVANCED_FLOWS}/{flow_id}/trigger/", "POST"),  # With trailing slash
+                # Fallback variations
+                (f"{API_BASE_MANAGER}/flows/flow/{flow_id}/trigger", "POST"),  # Old/incorrect
+                (f"{API_FLOWS}/{flow_id}/run", "PUT"),  # Alternative trigger method
+                (f"{API_FLOWS}/{flow_id}/run", "POST"),  # POST to /run
+                (f"{API_BASE_V1}/flow/{flow_id}/trigger", "POST"),  # V1 endpoint
+                (f"{API_BASE_V1}/flow/{flow_id}/run", "PUT"),  # V1 run endpoint
+            ]
 
         for endpoint, method in endpoints_to_try:
             try:
                 url = f"{self.host}{endpoint}"
-                _LOGGER.debug("Trying to trigger flow %s via %s %s", flow_id, method, url)
                 
                 if method == "POST":
                     async with self.session.post(url) as response:
                         status = response.status
                         if status == 200 or status == 204:
-                            _LOGGER.info("Successfully triggered flow %s via %s", flow_id, endpoint)
                             return True
                         elif status == 404:
-                            _LOGGER.debug("Flow trigger endpoint %s not found, trying next...", endpoint)
                             continue
                         else:
-                            try:
-                                error_text = await response.text()
-                            except:
-                                error_text = f"Status {status}"
-                            _LOGGER.debug(
-                                "Failed to trigger flow %s via %s %s: %s - %s",
-                                flow_id,
-                                method,
-                                endpoint,
-                                status,
-                                error_text[:200],
-                            )
                             continue
                 else:  # PUT
                     async with self.session.put(url) as response:
                         status = response.status
                         if status == 200 or status == 204:
-                            _LOGGER.info("Successfully triggered flow %s via %s", flow_id, endpoint)
                             return True
                         elif status == 404:
-                            _LOGGER.debug("Flow trigger endpoint %s not found, trying next...", endpoint)
                             continue
                         else:
-                            try:
-                                error_text = await response.text()
-                            except:
-                                error_text = f"Status {status}"
-                            _LOGGER.debug(
-                                "Failed to trigger flow %s via %s %s: %s - %s",
-                                flow_id,
-                                method,
-                                endpoint,
-                                status,
-                                error_text[:200],
-                            )
                             continue
             except Exception as err:
-                _LOGGER.debug("Error triggering flow %s via %s %s: %s", flow_id, method, endpoint, err)
                 continue
 
-        _LOGGER.error("Failed to trigger flow %s from any endpoint. Check logs for details.", flow_id)
+        _LOGGER.error("Failed to trigger flow %s from any endpoint", flow_id)
         return False
 
     async def get_zones(self) -> dict[str, dict[str, Any]]:

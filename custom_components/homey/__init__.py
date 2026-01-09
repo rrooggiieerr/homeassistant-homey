@@ -193,13 +193,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # If flow_name provided, find flow_id
         if flow_name and not flow_id:
             flows = await api_instance.get_flows()
+            flow_name_normalized = flow_name.strip().lower()
+            available_flow_names = []
+            
             for fid, flow in flows.items():
-                if flow.get("name") == flow_name:
+                flow_display_name = flow.get("name", "Unknown")
+                available_flow_names.append(flow_display_name)
+                
+                # Try exact match first
+                if flow_display_name == flow_name:
+                    flow_id = fid
+                    break
+                
+                # Try case-insensitive match
+                if flow_display_name.strip().lower() == flow_name_normalized:
                     flow_id = fid
                     break
             
             if not flow_id:
-                _LOGGER.error("Flow not found: %s", flow_name)
+                _LOGGER.error("Flow not found: '%s'. Available flows: %s", flow_name, ", ".join(available_flow_names[:10]))
                 return
         
         success = await api_instance.trigger_flow(flow_id)

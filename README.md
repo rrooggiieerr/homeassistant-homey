@@ -4,7 +4,7 @@
 [![GitHub issues](https://img.shields.io/github/issues/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/issues)
 [![GitHub stars](https://img.shields.io/github/stars/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/stargazers)
 
-**Version**: 1.0.1 | **Last Updated**: 2026-01-08 | [Changelog](CHANGELOG.md)
+**Version**: 1.0.2 | **Last Updated**: 2026-01-09 | [Changelog](CHANGELOG.md)
 
 A Home Assistant integration that automatically discovers and connects all your Homey devices, making them available natively in Home Assistant.
 
@@ -22,7 +22,7 @@ This integration bridges your [Homey](https://homey.app) hub with Home Assistant
 - 📊 **Comprehensive Sensors**: Temperature, humidity, pressure, power, voltage, current, luminance, CO2, and CO
 - 🚨 **Security Sensors**: Motion, contact, tamper, smoke, CO alarm, CO2 alarm, water leak, and battery sensors
 - 🌡️ **Climate Control**: Thermostat support with target temperature control
-- 🎬 **Homey Flows**: Trigger your Homey automations (Flows) from Home Assistant as button entities or via service calls
+- 🎬 **Homey Flows**: Trigger your Homey automations (Standard and Advanced Flows) from Home Assistant as button entities or via service calls
 - 🏠 **Room Organization**: Automatically assigns devices to Home Assistant Areas based on Homey rooms
 - 🔄 **Automatic Synchronization**: Automatically syncs device changes from Homey (renames, room changes, deletions)
 - 📡 **Fast Status Updates**: Immediate status updates after changes (1-2 seconds), with background polling every 10 seconds
@@ -38,16 +38,23 @@ Before installing the integration, you need to create an API Key in Homey:
 3. Click **New API Key**
 4. Give it a name (e.g., "Home Assistant")
 5. Select the necessary permissions:
-   - `device:read` - **Required** to read device states
-   - `device:write` - **Required** to control devices
-   - `flow:read` - **Required** to list Flows (needed for Flow button entities and service calls using flow names)
-   - `flow:write` - **Required** to trigger Flows (needed to actually execute Flows)
-   - `zone:read` - **Optional**, but recommended for room/area organization
+
+   **Devices:**
+   - **View devices** - **Required** to read device states
+   - **Control devices** - **Required** to control devices
+   
+   **Flows:**
+   - **View Flows** - **Required** to list Flows (needed for Flow button entities and service calls using flow names)
+   - **Start Flows** - **Required** to trigger Flows (needed to actually execute Flows)
+   
+   **Zones:**
+   - **View Zones** - **Optional**, but recommended for room/area organization
+
 6. Copy the API Key (you won't be able to see it again!)
 
 **Notes**: 
-- If you don't grant `zone:read` permission, devices will still be imported but won't be organized by Homey rooms. They will appear without room grouping in the device selection dialog.
-- If you don't grant `flow:read` and `flow:write` permissions, Flow support will be disabled. No Flow button entities will be created, and the `homey.trigger_flow` service will not work.
+- If you don't grant **View Zones** permission, devices will still be imported but won't be organized by Homey rooms. They will appear without room grouping in the device selection dialog.
+- If you don't grant **View Flows** and **Start Flows** permissions, Flow support will be disabled. No Flow button entities will be created, and the `homey.trigger_flow` service will not work.
 
 **Important**: Keep this API Key safe - you'll need it during the setup process!
 
@@ -146,6 +153,88 @@ After copying files:
 
 This integration will be available in HACS in the future.
 
+## Updating the Integration
+
+When a new version of the integration is released, follow these steps to update:
+
+### Step 1: Download the Latest Version
+
+1. **If you cloned the repository:**
+   ```bash
+   cd /path/to/homeyHASS
+   git pull origin main
+   ```
+
+2. **If you downloaded manually:**
+   - Go to the [GitHub repository](https://github.com/ifMike/homeyHASS)
+   - Click **Code** → **Download ZIP**
+   - Extract the ZIP file
+
+### Step 2: Replace the Integration Files
+
+**Option A: Direct File System Access (SSH/Docker)**
+
+1. Stop Home Assistant (recommended but not required)
+2. Replace the `custom_components/homey` folder:
+   ```bash
+   # Backup current version (optional but recommended)
+   cp -r <config>/custom_components/homey <config>/custom_components/homey.backup
+   
+   # Copy new version
+   cp -r /path/to/homeyHASS/custom_components/homey <config>/custom_components/
+   ```
+
+**Option B: Using Samba (Network Drive)**
+
+1. Connect to your Home Assistant via Samba (see [Installation - Option 2](#option-2-using-samba-network-drive) above)
+2. Navigate to `config/custom_components/`
+3. Delete the old `homey` folder (or rename it to `homey.backup` for backup)
+4. Copy the new `homey` folder from the downloaded repository
+
+### Step 3: Restart Home Assistant
+
+1. Go to **Settings** → **System** → **Restart**
+2. Wait for Home Assistant to fully restart
+
+### Step 4: Reload the Integration (Recommended)
+
+After restarting, reload the integration to ensure all changes are applied:
+
+1. Go to **Settings** → **Devices & Services**
+2. Find **Homey** integration
+3. Click the **⋮** (three dots) menu
+4. Select **Reload**
+
+### Step 5: Verify the Update
+
+1. Check the logs for any errors:
+   - **Settings** → **System** → **Logs**
+   - Look for entries starting with `custom_components.homey`
+2. Test functionality:
+   - Try controlling a device
+   - Check if flow buttons appear (if you have flows)
+   - Verify devices are updating correctly
+
+### Troubleshooting Updates
+
+**If devices stop working after update:**
+
+1. **Reload the integration** (see Step 4 above)
+2. **Check API permissions** - Some updates may require additional API key permissions
+3. **Check the CHANGELOG** - Review what changed in the new version
+4. **Restore backup** (if you created one):
+   ```bash
+   rm -r <config>/custom_components/homey
+   mv <config>/custom_components/homey.backup <config>/custom_components/homey
+   ```
+5. **Check GitHub Issues** - See if others are experiencing the same issue
+
+**If flows stop working:**
+
+- Ensure your API key has **View Flows** and **Start Flows** permissions
+- Reload the integration
+- Check that flows are enabled in Homey
+
 ## Configuration
 
 ### Setup Steps
@@ -175,15 +264,19 @@ Once configured, all your Homey devices will appear in Home Assistant under **Se
 
 ### Homey Flows (Automations)
 
-**Prerequisites**: Flow support requires `flow:read` and `flow:write` permissions in your API key. Without these permissions, Flow button entities will not be created and the `homey.trigger_flow` service will not work.
+**Prerequisites**: Flow support requires **View Flows** and **Start Flows** permissions in your API key. Without these permissions, Flow button entities will not be created and the `homey.trigger_flow` service will not work.
+
+**Supported Flow Types**: The integration supports both **Standard Flows** and **Advanced Flows** from Homey. Both types will appear as button entities and can be triggered via service calls.
 
 The integration exposes your Homey Flows in two ways:
 
 #### 1. Button Entities
 
-Each enabled Homey Flow appears as a button entity in Home Assistant. Simply press the button to trigger the Flow.
+Each enabled Homey Flow (both Standard and Advanced) appears as a button entity in Home Assistant. Simply press the button to trigger the Flow.
 
 **Entity ID format**: `button.<flow_name>`
+
+**Note**: Flows are automatically discovered from both Standard and Advanced Flow endpoints. Disabled flows will not appear as button entities.
 
 #### 2. Service Call
 
@@ -235,7 +328,7 @@ The integration automatically synchronizes changes made in Homey with Home Assis
 - When you move a device to a different room in Homey, the device's area in Home Assistant updates automatically
 - New areas are automatically created in Home Assistant if they don't exist
 - Room names are refreshed periodically (~5 minutes) to pick up room name changes
-- **Note**: Room organization requires `zone:read` permission in your API key. Without this permission, devices will still work but won't be organized by rooms.
+- **Note**: Room organization requires **View Zones** permission in your API key. Without this permission, devices will still work but won't be organized by rooms.
 
 ### Device Deletion
 - When you delete a device in Homey, it and all its entities are automatically removed from Home Assistant
@@ -321,9 +414,9 @@ The integration supports devices with the following capabilities:
 ## Known Issues & Limitations
 
 ### Room/Zone Detection
-- **Issue**: Rooms may not be detected if your API key doesn't have `zone:read` permission.
+- **Issue**: Rooms may not be detected if your API key doesn't have **View Zones** permission.
 - **Impact**: Devices will still be imported and work correctly, but won't be organized by rooms in the device selection dialog or assigned to areas automatically.
-- **Solution**: Add `zone:read` permission to your API key in Homey Settings → API Keys → Edit your API key.
+- **Solution**: Add **View Zones** permission to your API key in Homey Settings → API Keys → Edit your API key.
 
 ### Config Flow Window Size
 - **Issue**: The device selection dialog has a fixed size and cannot be resized or customized.
@@ -420,17 +513,6 @@ If device name or room changes made in Homey aren't appearing in Home Assistant:
 2. **Check Logs**: Look for messages about device registry updates in the logs
 3. **Manual Refresh**: Reload the integration: **Settings** → **Devices & Services** → **Homey** → **⋮** → **Reload**
 4. **Verify Changes**: Make sure the changes were actually saved in Homey
-
-## API Reference
-
-For complete API documentation, error lookup, and troubleshooting guides, see **[API_REFERENCE.md](API_REFERENCE.md)**.
-
-This document includes:
-- Complete Homey API endpoint reference (all variations)
-- Home Assistant config flow patterns and validation
-- Common errors and solutions
-- Error lookup guide
-- Best practices
 
 ## Development
 
