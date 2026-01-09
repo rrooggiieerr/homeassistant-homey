@@ -762,10 +762,10 @@ class HomeyAPI:
             return {}
 
         endpoints_to_try = [
-            API_MOODS,  # /api/manager/mood/mood
+            API_MOODS,  # /api/manager/moods/mood (correct per API v3)
             f"{API_MOODS}/",  # With trailing slash
-            f"{API_BASE_MANAGER}/moods/mood",  # Plural variation
-            f"{API_BASE_MANAGER}/moods/mood/",  # With trailing slash
+            f"{API_BASE_MANAGER}/mood/mood",  # Singular variation (fallback)
+            f"{API_BASE_MANAGER}/mood/mood/",  # With trailing slash
             f"{API_BASE_V1}/mood",  # V1 endpoint
             f"{API_BASE_V1}/mood/",  # With trailing slash
         ]
@@ -824,12 +824,12 @@ class HomeyAPI:
             return False
 
         endpoints_to_try = [
-            f"{API_MOODS}/{mood_id}/set",  # /api/manager/mood/mood/{id}/set (matches permission name)
+            f"{API_MOODS}/{mood_id}/set",  # /api/manager/moods/mood/{id}/set (correct per API v3)
             f"{API_MOODS}/{mood_id}/set/",  # With trailing slash
-            f"{API_MOODS}/{mood_id}/trigger",  # /api/manager/mood/mood/{id}/trigger
+            f"{API_BASE_MANAGER}/mood/mood/{mood_id}/set",  # Singular variation (fallback)
+            f"{API_BASE_MANAGER}/mood/mood/{mood_id}/set/",  # With trailing slash
+            f"{API_MOODS}/{mood_id}/trigger",  # Alternative trigger method
             f"{API_MOODS}/{mood_id}/trigger/",  # With trailing slash
-            f"{API_BASE_MANAGER}/moods/mood/{mood_id}/set",  # Plural variation with /set
-            f"{API_BASE_MANAGER}/moods/mood/{mood_id}/trigger",  # Plural variation
             f"{API_BASE_V1}/mood/{mood_id}/set",  # V1 endpoint with /set
             f"{API_BASE_V1}/mood/{mood_id}/trigger",  # V1 endpoint
             f"{API_MOODS}/{mood_id}/run",  # Alternative trigger method
