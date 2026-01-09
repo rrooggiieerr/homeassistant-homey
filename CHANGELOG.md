@@ -57,6 +57,11 @@ _No unreleased changes yet._
 - **Clear Warnings**: Detailed log messages inform users about missing permissions and their impact
 - **Permission Documentation**: Updated README with complete permission requirements and impact table
 
+#### HACS Integration
+- **HACS Support**: Added `hacs.json` configuration file for HACS integration
+- **HACS Installation Guide**: Updated README with comprehensive HACS installation instructions
+- **Table of Contents**: Added navigation table of contents to README for easier navigation
+
 ### Fixed
 - **Humidity Conversions** - Fixed handling of normalized (0-1) vs percentage (0-100) humidity values in sensors and climate controls
 - **Climate Initialization Bug** - Fixed `capabilities` variable used before definition in climate platform

@@ -33,6 +33,31 @@ This integration bridges your [Homey](https://homey.app) hub with Home Assistant
 - 🎯 **Smart Device Grouping**: All entities from the same device are automatically grouped under one device entry
 - 🔐 **Permission Management**: Comprehensive permission checking with graceful degradation - integration works even with limited permissions
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+  - [Manual Installation](#manual-installation)
+  - [Installation via HACS](#installation-via-hacs)
+- [Updating the Integration](#updating-the-integration)
+- [Configuration](#configuration)
+- [Usage](#usage)
+  - [Devices](#devices)
+  - [Homey Flows (Automations)](#homey-flows-automations)
+  - [Homey Scenes and Moods](#homey-scenes-and-moods)
+  - [Physical Device Buttons](#physical-device-buttons)
+- [Device Organization](#device-organization)
+- [Automatic Synchronization](#automatic-synchronization)
+- [Supported Devices](#supported-devices)
+- [Known Issues & Limitations](#known-issues--limitations)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
+- [API Documentation](#api-documentation)
+- [License](#license)
+- [Support](#support)
+
 ## Prerequisites
 
 Before installing the integration, you need to create an API Key in Homey:
@@ -165,9 +190,55 @@ After copying files:
 1. Go to **Settings** → **Devices & Services** → **Add Integration**
 2. Search for **"Homey"** and follow the setup instructions
 
-### Installation via HACS (Coming Soon)
+### Installation via HACS
 
-This integration will be available in HACS in the future.
+**HACS (Home Assistant Community Store)** is the easiest way to install and keep this integration updated.
+
+#### Prerequisites
+
+1. **Install HACS** (if you haven't already):
+   - Follow the [HACS installation guide](https://hacs.xyz/docs/setup/download)
+   - Restart Home Assistant after installing HACS
+
+#### Installation Steps
+
+**Option 1: Custom Repository (Recommended for now)**
+
+1. Open **HACS** in Home Assistant
+2. Go to **Integrations**
+3. Click the three dots menu (⋮) in the top-right corner
+4. Select **Custom repositories**
+5. Add the repository:
+   - **Repository**: `https://github.com/ifMike/homeyHASS`
+   - **Category**: Select **Integration**
+6. Click **Add**
+7. Close the dialog
+8. Search for **"Homey"** in HACS Integrations
+9. Click on **Homey Integration**
+10. Click **Download**
+11. Restart Home Assistant
+12. Go to **Settings** → **Devices & Services** → **Add Integration**
+13. Search for **"Homey"** and follow the setup instructions
+
+**Option 2: HACS Default Repository (Future)**
+
+Once this integration is added to the HACS default repository, you can simply:
+1. Open **HACS** → **Integrations**
+2. Click **Explore & Download Repositories**
+3. Search for **"Homey"**
+4. Click **Download**
+5. Restart Home Assistant
+6. Configure the integration
+
+#### Updating via HACS
+
+When a new version is available:
+1. Open **HACS** → **Integrations**
+2. Find **Homey Integration**
+3. Click **Update** if an update is available
+4. Restart Home Assistant
+
+**Note**: HACS will automatically check for updates and notify you when new versions are available.
 
 ## Updating the Integration
 
