@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -16,6 +17,50 @@ from .homey_api import HomeyAPI
 _LOGGER = logging.getLogger(__name__)
 
 # Module loaded
+
+def _check_installation_conflict() -> None:
+    """Check for conflicting installation methods and warn if detected.
+    
+    This detects if there's a manual installation conflicting with HACS,
+    or vice versa, and logs a warning to help users troubleshoot.
+    """
+    try:
+        # Get the path to this integration's directory
+        integration_dir = Path(__file__).parent.resolve()
+        
+        # Check for HACS metadata file (HACS creates .hacs.json in custom_components/)
+        # Path structure: config/custom_components/homey/__init__.py
+        # So custom_components is parent.parent
+        custom_components_dir = integration_dir.parent
+        hacs_json = custom_components_dir / ".hacs.json"
+        hacs_installed = hacs_json.exists()
+        
+        # Check for git directory in custom_components (indicates manual git clone of entire repo)
+        # Path: config/custom_components/.git
+        git_dir = custom_components_dir / ".git"
+        manual_git = git_dir.exists()
+        
+        # Check for git directory in integration folder itself (another manual install pattern)
+        integration_git = integration_dir / ".git"
+        integration_has_git = integration_git.exists()
+        
+        if hacs_installed and (manual_git or integration_has_git):
+            _LOGGER.warning(
+                "⚠️  Installation conflict detected: You appear to have both HACS and manual installation. "
+                "This can cause update issues. Please remove the manual installation folder "
+                "(%s) and restart Home Assistant, then update via HACS.",
+                integration_dir
+            )
+        elif hacs_installed:
+            _LOGGER.debug("HACS installation detected - updates should be managed via HACS")
+        elif manual_git or integration_has_git:
+            _LOGGER.debug("Manual installation detected - updates should be done manually")
+    except Exception as err:
+        # Don't let installation check break the integration
+        _LOGGER.debug("Could not check installation method: %s", err)
+
+# Run check on module load
+_check_installation_conflict()
 
 
 def filter_devices(devices: dict[str, dict[str, Any]], device_filter: list[str] | None) -> dict[str, dict[str, Any]]:

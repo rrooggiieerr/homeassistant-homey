@@ -240,6 +240,30 @@ When a new version is available:
 
 **Note**: HACS will automatically check for updates and notify you when new versions are available.
 
+### Migrating from Manual Installation to HACS
+
+If you previously installed this integration manually and want to switch to HACS for easier updates:
+
+1. **Remove the manual installation:**
+   - Delete the `custom_components/homey/` folder from your Home Assistant config directory
+   - Or use SSH/Samba to remove: `<config directory>/custom_components/homey/`
+
+2. **Restart Home Assistant:**
+   - Go to **Settings** → **System** → **Restart**
+   - Wait for full restart
+
+3. **Install via HACS:**
+   - Follow the HACS installation steps above
+   - Your existing configuration will be preserved
+   - No need to reconfigure - your devices and settings remain intact
+
+4. **Verify installation:**
+   - Check **Settings** → **Devices & Services** → **Homey**
+   - All your devices should still be there
+   - Integration should show version 1.1.0 or later
+
+**Important**: Do NOT have both manual and HACS installations at the same time. This can cause conflicts and errors. Choose one method and stick with it.
+
 ## Updating the Integration
 
 When a new version of the integration is released, follow these steps to update:
