@@ -824,9 +824,13 @@ class HomeyAPI:
             return False
 
         endpoints_to_try = [
+            f"{API_MOODS}/{mood_id}/set",  # /api/manager/mood/mood/{id}/set (matches permission name)
+            f"{API_MOODS}/{mood_id}/set/",  # With trailing slash
             f"{API_MOODS}/{mood_id}/trigger",  # /api/manager/mood/mood/{id}/trigger
             f"{API_MOODS}/{mood_id}/trigger/",  # With trailing slash
+            f"{API_BASE_MANAGER}/moods/mood/{mood_id}/set",  # Plural variation with /set
             f"{API_BASE_MANAGER}/moods/mood/{mood_id}/trigger",  # Plural variation
+            f"{API_BASE_V1}/mood/{mood_id}/set",  # V1 endpoint with /set
             f"{API_BASE_V1}/mood/{mood_id}/trigger",  # V1 endpoint
             f"{API_MOODS}/{mood_id}/run",  # Alternative trigger method
             f"{API_MOODS}/{mood_id}/activate",  # Alternative activate method
@@ -839,11 +843,19 @@ class HomeyAPI:
                         _LOGGER.debug("Successfully triggered mood %s via %s", mood_id, endpoint)
                         return True
                     elif response.status == 404:
+                        _LOGGER.debug("Mood trigger endpoint %s not found (404), trying next...", endpoint)
                         continue
                     elif response.status in (401, 403):
+                        _LOGGER.debug("Mood trigger endpoint %s returned %s (permission denied)", endpoint, response.status)
                         PermissionChecker.check_permission(response.status, "moods", "write", f"trigger_mood({mood_id})")
                         continue
                     else:
+                        # Log other status codes to help debug
+                        try:
+                            error_text = await response.text()
+                            _LOGGER.debug("Mood trigger endpoint %s returned status %s: %s", endpoint, response.status, error_text[:200])
+                        except:
+                            _LOGGER.debug("Mood trigger endpoint %s returned status %s", endpoint, response.status)
                         continue
             except Exception as err:
                 _LOGGER.debug("Error triggering mood %s via %s: %s", mood_id, endpoint, err)
