@@ -111,6 +111,65 @@ class HomeyMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
         muted = capabilities.get("volume_mute", {}).get("value", False)
         return bool(muted)
 
+    @property
+    def media_artist(self) -> str | None:
+        """Return the artist of current playing media."""
+        device_data = self.coordinator.data.get(self._device_id, self._device)
+        capabilities = device_data.get("capabilitiesObj", {})
+        artist = capabilities.get("speaker_artist", {}).get("value")
+        return str(artist) if artist is not None else None
+
+    @property
+    def media_album_name(self) -> str | None:
+        """Return the album name of current playing media."""
+        device_data = self.coordinator.data.get(self._device_id, self._device)
+        capabilities = device_data.get("capabilitiesObj", {})
+        album = capabilities.get("speaker_album", {}).get("value")
+        return str(album) if album is not None else None
+
+    @property
+    def media_title(self) -> str | None:
+        """Return the title of current playing media."""
+        device_data = self.coordinator.data.get(self._device_id, self._device)
+        capabilities = device_data.get("capabilitiesObj", {})
+        track = capabilities.get("speaker_track", {}).get("value")
+        return str(track) if track is not None else None
+
+    @property
+    def media_duration(self) -> int | None:
+        """Return the duration of current playing media in seconds."""
+        device_data = self.coordinator.data.get(self._device_id, self._device)
+        capabilities = device_data.get("capabilitiesObj", {})
+        duration = capabilities.get("speaker_duration", {}).get("value")
+        if duration is not None:
+            try:
+                return int(float(duration))
+            except (ValueError, TypeError):
+                return None
+        return None
+
+    @property
+    def media_position(self) -> int | None:
+        """Return the current position of playing media in seconds."""
+        device_data = self.coordinator.data.get(self._device_id, self._device)
+        capabilities = device_data.get("capabilitiesObj", {})
+        position = capabilities.get("speaker_position", {}).get("value")
+        if position is not None:
+            try:
+                return int(float(position))
+            except (ValueError, TypeError):
+                return None
+        return None
+
+    @property
+    def media_position_updated_at(self):
+        """When was the position of the current playing media valid."""
+        # Return current time if we have position data
+        if self.media_position is not None:
+            from homeassistant.util.dt import utcnow
+            return utcnow()
+        return None
+
     async def async_media_play(self) -> None:
         """Send play command."""
         if "speaker_playing" in self._device.get("capabilitiesObj", {}):

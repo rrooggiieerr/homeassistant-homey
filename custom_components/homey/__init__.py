@@ -34,7 +34,10 @@ PLATFORMS: list[Platform] = [
     Platform.FAN,
     Platform.LOCK,
     Platform.MEDIA_PLAYER,
-    Platform.BUTTON,  # For Homey flows
+    Platform.BUTTON,  # For Homey flows and device buttons
+    Platform.NUMBER,
+    Platform.SELECT,
+    Platform.SCENE,
 ]
 
 
@@ -221,6 +224,83 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.error("Failed to trigger Homey flow: %s", flow_id)
 
     hass.services.async_register(DOMAIN, "trigger_flow", async_trigger_flow)
+
+    # Register service to enable flows
+    async def async_enable_flow(call) -> None:
+        """Service to enable a Homey flow."""
+        entry_data = hass.data[DOMAIN].get(entry.entry_id)
+        if not entry_data or "api" not in entry_data:
+            _LOGGER.error("Homey API not available")
+            return
+        
+        api_instance = entry_data["api"]
+        flow_id = call.data.get("flow_id")
+        flow_name = call.data.get("flow_name")
+        
+        if not flow_id and not flow_name:
+            _LOGGER.error("Either flow_id or flow_name must be provided")
+            return
+        
+        # If flow_name provided, find flow_id
+        if flow_name and not flow_id:
+            flows = await api_instance.get_flows()
+            flow_name_normalized = flow_name.strip().lower()
+            
+            for fid, flow in flows.items():
+                flow_display_name = flow.get("name", "Unknown")
+                if flow_display_name == flow_name or flow_display_name.strip().lower() == flow_name_normalized:
+                    flow_id = fid
+                    break
+            
+            if not flow_id:
+                _LOGGER.error("Flow not found: '%s'", flow_name)
+                return
+        
+        success = await api_instance.enable_flow(flow_id)
+        if success:
+            _LOGGER.info("Enabled Homey flow: %s", flow_id)
+        else:
+            _LOGGER.error("Failed to enable Homey flow: %s", flow_id)
+
+    # Register service to disable flows
+    async def async_disable_flow(call) -> None:
+        """Service to disable a Homey flow."""
+        entry_data = hass.data[DOMAIN].get(entry.entry_id)
+        if not entry_data or "api" not in entry_data:
+            _LOGGER.error("Homey API not available")
+            return
+        
+        api_instance = entry_data["api"]
+        flow_id = call.data.get("flow_id")
+        flow_name = call.data.get("flow_name")
+        
+        if not flow_id and not flow_name:
+            _LOGGER.error("Either flow_id or flow_name must be provided")
+            return
+        
+        # If flow_name provided, find flow_id
+        if flow_name and not flow_id:
+            flows = await api_instance.get_flows()
+            flow_name_normalized = flow_name.strip().lower()
+            
+            for fid, flow in flows.items():
+                flow_display_name = flow.get("name", "Unknown")
+                if flow_display_name == flow_name or flow_display_name.strip().lower() == flow_name_normalized:
+                    flow_id = fid
+                    break
+            
+            if not flow_id:
+                _LOGGER.error("Flow not found: '%s'", flow_name)
+                return
+        
+        success = await api_instance.disable_flow(flow_id)
+        if success:
+            _LOGGER.info("Disabled Homey flow: %s", flow_id)
+        else:
+            _LOGGER.error("Failed to disable Homey flow: %s", flow_id)
+
+    hass.services.async_register(DOMAIN, "enable_flow", async_enable_flow)
+    hass.services.async_register(DOMAIN, "disable_flow", async_disable_flow)
 
     return True
 

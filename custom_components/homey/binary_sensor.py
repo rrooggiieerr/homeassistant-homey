@@ -29,6 +29,15 @@ CAPABILITY_TO_DEVICE_CLASS = {
     "alarm_co2": None,  # CO2 device class not available in all HA versions
     "alarm_water": BinarySensorDeviceClass.MOISTURE,
     "alarm_battery": BinarySensorDeviceClass.BATTERY,
+    # Additional binary sensor capabilities
+    "alarm_gas": BinarySensorDeviceClass.GAS,
+    "alarm_fire": BinarySensorDeviceClass.SMOKE,  # Use SMOKE as closest match
+    "alarm_panic": None,  # Generic binary sensor
+    "alarm_burglar": None,  # Generic binary sensor
+    "alarm_generic": None,  # Generic binary sensor
+    "alarm_maintenance": None,  # Generic binary sensor
+    "button": None,  # Generic binary sensor (BinarySensorDeviceClass.BUTTON may not be available in all versions)
+    "vibration": None,  # Generic binary sensor
 }
 
 

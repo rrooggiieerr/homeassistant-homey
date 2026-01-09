@@ -127,6 +127,18 @@ class HomeyLight(CoordinatorEntity, LightEntity):
 
         self._attr_device_info = get_device_info(device_id, device, zones)
 
+    async def async_added_to_hass(self) -> None:
+        """When entity is added to Home Assistant, ensure we have fresh data."""
+        await super().async_added_to_hass()
+        # Trigger a refresh to ensure we have the latest device state
+        # This helps fix stale color values on initial load
+        if self.coordinator.data and self._device_id in self.coordinator.data:
+            # Coordinator has data, but refresh this specific device to ensure it's current
+            await self.coordinator.async_refresh_device(self._device_id)
+        elif not self.coordinator.data:
+            # Coordinator doesn't have data yet, request a refresh
+            await self.coordinator.async_request_refresh()
+
     @property
     def is_on(self) -> bool:
         """Return true if light is on."""
@@ -159,15 +171,40 @@ class HomeyLight(CoordinatorEntity, LightEntity):
     @property
     def hs_color(self) -> tuple[float, float] | None:
         """Return the hue and saturation color value."""
-        device_data = self.coordinator.data.get(self._device_id, self._device)
+        # Always prefer coordinator data (most up-to-date)
+        # Only fall back to self._device if coordinator data is not available
+        if self.coordinator.data and self._device_id in self.coordinator.data:
+            device_data = self.coordinator.data[self._device_id]
+        else:
+            # Coordinator data not available yet - use initial device data
+            # This should rarely happen as coordinator should be populated before entities are created
+            device_data = self._device
+        
         capabilities = device_data.get("capabilitiesObj", {})
         hue_normalized = capabilities.get("light_hue", {}).get("value")
         saturation_normalized = capabilities.get("light_saturation", {}).get("value")
+        
         if hue_normalized is not None and saturation_normalized is not None:
             # Homey returns normalized values (0-1), convert to Home Assistant format (hue 0-360, sat 0-100)
             hue = hue_normalized * 360.0
             saturation = saturation_normalized * 100.0
+            
+            # Log color values for debugging (only when they change to avoid spam)
+            if not hasattr(self, "_last_logged_color"):
+                self._last_logged_color = None
+            
+            current_color = (round(hue, 1), round(saturation, 1))
+            if self._last_logged_color != current_color:
+                _LOGGER.debug(
+                    "Light %s (%s) color read: hue_norm=%.4f (HA=%.2f°), sat_norm=%.4f (HA=%.2f%%) [from %s]",
+                    self._device_id, self._attr_name,
+                    hue_normalized, hue, saturation_normalized, saturation,
+                    "coordinator" if (self.coordinator.data and self._device_id in self.coordinator.data) else "initial_data"
+                )
+                self._last_logged_color = current_color
+            
             return (hue, saturation)
+        
         return None
 
     @property

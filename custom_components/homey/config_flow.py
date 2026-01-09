@@ -72,7 +72,9 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 
                 data = None
                 last_error = None
+                last_error_details = None
                 auth_errors = []  # Track 401 errors from different endpoints
+                error_details = []  # Collect detailed error information
                 
                 async with aiohttp.ClientSession(
                     connector=connector,
@@ -96,31 +98,50 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                         # If JSON parsing fails, read text for debugging
                                         try:
                                             response_text = await response.read()
+                                            error_msg = f"HTTP 200 but JSON parse failed: {str(json_err)}"
+                                            error_details.append(f"{url}: {error_msg}")
                                             _LOGGER.warning("Failed to parse JSON from %s: %s, body: %s", url, json_err, response_text[:200].decode('utf-8', errors='ignore'))
                                         except:
+                                            error_msg = f"HTTP 200 but JSON parse failed: {str(json_err)}"
+                                            error_details.append(f"{url}: {error_msg}")
                                             _LOGGER.warning("Failed to parse JSON from %s: %s", url, json_err)
                                         # Continue to next endpoint
                                 elif response.status == 401:
                                     # Some endpoints may return 401 even with valid credentials
                                     # Track it but continue trying other endpoints
                                     auth_errors.append(endpoint)
+                                    try:
+                                        response_text = await response.text()
+                                        error_details.append(f"{url}: HTTP 401 Unauthorized - {response_text[:200]}")
+                                    except:
+                                        error_details.append(f"{url}: HTTP 401 Unauthorized")
                                     _LOGGER.debug("Authentication failed with endpoint %s (will try other endpoints)", endpoint)
                                     continue
                                 elif response.status == 404:
                                     _LOGGER.debug("Endpoint %s not found, trying next...", endpoint)
                                     last_error = f"Endpoint {endpoint} not found"
+                                    last_error_details = f"HTTP 404 Not Found for {url}"
+                                    error_details.append(last_error_details)
                                     continue
                                 else:
                                     try:
                                         response_text = await response.text()
+                                        error_msg = f"HTTP {response.status} - {response_text[:200]}"
+                                        error_details.append(f"{url}: {error_msg}")
                                         _LOGGER.debug("Unexpected status %s for %s: %s", response.status, url, response_text[:200])
                                     except:
+                                        error_msg = f"HTTP {response.status}"
+                                        error_details.append(f"{url}: {error_msg}")
                                         _LOGGER.debug("Unexpected status %s for %s", response.status, url)
                                     last_error = f"Status {response.status} for {endpoint}"
+                                    last_error_details = error_msg
                                     continue
                         except Exception as err:
+                            error_msg = f"Connection error: {str(err)}"
+                            error_details.append(f"{url}: {error_msg}")
                             _LOGGER.debug("Error trying endpoint %s: %s", endpoint, err)
                             last_error = str(err)
+                            last_error_details = error_msg
                             continue
                     
                     # If we got data from any endpoint, proceed
@@ -129,7 +150,15 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         pass
                     elif auth_errors and len(auth_errors) == len(endpoints_to_try):
                         # ALL endpoints returned 401 - this means invalid credentials
-                        errors["base"] = "invalid_auth"
+                        # Show a summary of errors
+                        probable_cause = "Probable cause: Invalid API key or API key missing required permissions. Check Homey Settings → API Keys."
+                        if error_details:
+                            error_summary = "\n".join(error_details[:3])  # Show first 3 errors
+                            if len(error_details) > 3:
+                                error_summary += f"\n... ({len(error_details) - 3} more similar errors)"
+                            errors["base"] = f"invalid_auth\n\n{probable_cause}\n\nError details:\n{error_summary}"
+                        else:
+                            errors["base"] = f"invalid_auth\n\n{probable_cause}"
                         _LOGGER.error("Authentication failed with all system endpoints. Check your API key.")
                         return self.async_show_form(
                             step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
@@ -193,43 +222,111 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                     elif response.status == 401:
                                         # Track 401 but continue trying other device endpoints
                                         device_auth_errors.append(device_endpoint)
+                                        try:
+                                            error_details.append(f"{url}: HTTP 401 Unauthorized - {response_text[:200]}")
+                                        except:
+                                            error_details.append(f"{url}: HTTP 401 Unauthorized")
                                         _LOGGER.debug("Authentication failed with devices endpoint %s (will try other endpoints)", device_endpoint)
                                         continue
                                     elif response.status == 404:
+                                        error_details.append(f"{url}: HTTP 404 Not Found")
                                         _LOGGER.debug("Devices endpoint %s not found, trying next...", device_endpoint)
                                         continue
                                     else:
+                                        error_msg = f"HTTP {response.status} - {response_text[:200]}"
+                                        error_details.append(f"{url}: {error_msg}")
                                         _LOGGER.debug("Unexpected status %s for %s: %s", response.status, device_endpoint, response_text[:200])
                                         continue
                             except Exception as dev_err:
+                                url = f"{host}{device_endpoint}"
+                                error_msg = f"Connection error: {str(dev_err)}"
+                                error_details.append(f"{url}: {error_msg}")
                                 _LOGGER.debug("Error trying devices endpoint %s: %s", device_endpoint, dev_err)
                                 continue
                         
                         # If we get here, all endpoints failed
-                        # Check if we got 401 from all endpoints (both system and device)
+                        # Check if we got 401 from any API endpoints (especially the devices endpoint)
+                        # If we got 401 from actual API endpoints, it's an auth issue, not a connection issue
                         all_auth_errors = auth_errors + device_auth_errors
                         total_endpoints_tried = len(endpoints_to_try) + len(device_endpoints)
                         
-                        if len(all_auth_errors) == total_endpoints_tried:
-                            # ALL endpoints returned 401 - invalid credentials
-                            errors["base"] = "invalid_auth"
-                            _LOGGER.error("Authentication failed with all endpoints. Please verify your API key is correct and has the required permissions.")
+                        # Prioritize 401 errors: if we got 401 from any actual API endpoint, it's invalid_auth
+                        # (404s are normal - not all endpoints exist, but 401s mean auth failed)
+                        has_auth_error_from_key_endpoint = (
+                            device_auth_errors or  # Got 401 from devices endpoint (main API endpoint)
+                            len(auth_errors) > 0   # Got 401 from system endpoints
+                        )
+                        
+                        if len(all_auth_errors) == total_endpoints_tried or has_auth_error_from_key_endpoint:
+                            # Got 401 from API endpoints - invalid credentials
+                            probable_cause = "Probable cause: Invalid API key or API key missing required permissions. Check Homey Settings → API Keys."
+                            if error_details:
+                                # Show 401 errors first (they're most relevant)
+                                auth_error_details = [e for e in error_details if "401" in e]
+                                if auth_error_details:
+                                    error_summary = "\n".join(auth_error_details[:3])
+                                    if len(auth_error_details) > 3:
+                                        error_summary += f"\n... ({len(auth_error_details) - 3} more similar errors)"
+                                else:
+                                    error_summary = "\n".join(error_details[:3])
+                                    if len(error_details) > 3:
+                                        error_summary += f"\n... ({len(error_details) - 3} more similar errors)"
+                                errors["base"] = f"invalid_auth\n\n{probable_cause}\n\nError details:\n{error_summary}"
+                            else:
+                                errors["base"] = f"invalid_auth\n\n{probable_cause}"
+                            _LOGGER.error("Authentication failed with API endpoints. Please verify your API key is correct and has the required permissions.")
                         else:
                             # Some endpoints returned 404 or other errors - connection issue
-                            errors["base"] = "cannot_connect"
+                            # Determine probable cause based on error types
+                            has_connection_errors = any("Connection error" in e or "Connection refused" in e or "Name resolution" in e for e in error_details)
+                            has_timeout = any("timeout" in e.lower() for e in error_details)
+                            
+                            if has_connection_errors:
+                                probable_cause = f"Probable cause: Cannot reach Homey at {host}. Check that:\n- The IP address/hostname is correct\n- Homey is powered on and on the same network\n- Firewall is not blocking connections"
+                            elif has_timeout:
+                                probable_cause = f"Probable cause: Connection timeout. Homey at {host} is not responding. Check that:\n- Homey is powered on\n- Network connectivity is working\n- Firewall is not blocking connections"
+                            else:
+                                probable_cause = f"Probable cause: Cannot connect to Homey API at {host}. Check that:\n- The IP address/hostname is correct\n- Homey API is enabled in settings\n- Network connectivity is working"
+                            
+                            if error_details:
+                                # Show most relevant errors (prioritize non-404 errors)
+                                non_404_errors = [e for e in error_details if "404" not in e]
+                                if non_404_errors:
+                                    error_summary = "\n".join(non_404_errors[:3])
+                                    if len(non_404_errors) > 3:
+                                        error_summary += f"\n... ({len(non_404_errors) - 3} more errors)"
+                                else:
+                                    error_summary = "\n".join(error_details[:3])
+                                    if len(error_details) > 3:
+                                        error_summary += f"\n... ({len(error_details) - 3} more errors)"
+                                
+                                if last_error_details:
+                                    errors["base"] = f"cannot_connect\n\n{probable_cause}\n\nLast error: {last_error_details}\n\nAll errors:\n{error_summary}"
+                                else:
+                                    errors["base"] = f"cannot_connect\n\n{probable_cause}\n\nError details:\n{error_summary}"
+                            else:
+                                errors["base"] = f"cannot_connect\n\n{probable_cause}"
                             _LOGGER.error("Could not connect to Homey API. Tried system endpoints: %s and device endpoints: %s. Last error: %s", endpoints_to_try, device_endpoints, last_error)
             except aiohttp.ClientConnectorError as err:
-                errors["base"] = "cannot_connect"
+                error_msg = str(err)
+                probable_cause = f"Probable cause: Cannot reach Homey at {host}. Check that:\n- The IP address/hostname is correct\n- Homey is powered on and on the same network\n- Firewall is not blocking connections"
+                errors["base"] = f"cannot_connect\n\n{probable_cause}\n\nError details:\nConnection error: {error_msg}"
                 _LOGGER.error("Connection error: %s", err)
-            except aiohttp.ServerTimeoutError:
-                errors["base"] = "cannot_connect"
+            except aiohttp.ServerTimeoutError as err:
+                error_msg = f"Connection timeout after 10 seconds"
+                probable_cause = f"Probable cause: Homey at {host} is not responding. Check that:\n- Homey is powered on\n- Network connectivity is working\n- Firewall is not blocking connections\n- Try using the IP address instead of hostname"
+                errors["base"] = f"cannot_connect\n\n{probable_cause}\n\nError details:\n{error_msg}"
                 _LOGGER.error("Connection timeout")
             except aiohttp.ClientError as err:
-                errors["base"] = "cannot_connect"
+                error_msg = str(err)
+                probable_cause = f"Probable cause: Network or HTTP error connecting to {host}. Check that:\n- The IP address/hostname is correct\n- Homey API is enabled\n- Network connectivity is working"
+                errors["base"] = f"cannot_connect\n\n{probable_cause}\n\nError details:\nClient error: {error_msg}"
                 _LOGGER.error("Client error: %s", err)
             except Exception as err:
+                error_msg = str(err)
+                probable_cause = "Probable cause: Unexpected error occurred. Check the logs for more details."
+                errors["base"] = f"unknown\n\n{probable_cause}\n\nError details:\nUnexpected error: {error_msg}"
                 _LOGGER.exception("Unexpected exception: %s", err)
-                errors["base"] = "unknown"
 
         return self.async_show_form(
             step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
@@ -281,7 +378,7 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         continue
                 
                 # Try to get zones (rooms)
-                # Note: Zones may require additional API permissions (zone:read)
+                # Note: Zones may require additional API permissions (homey.zone.readonly)
                 # If zones can't be fetched, we'll proceed without room grouping
                 zone_endpoints = [
                     f"{self.host}/api/manager/zones/zone/",
@@ -304,17 +401,17 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 _LOGGER.debug("Successfully fetched zones from %s", zone_endpoint)
                                 break
                             elif response.status == 401:
-                                _LOGGER.debug("Zones endpoint requires authentication - may need zone:read permission")
+                                _LOGGER.debug("Zones endpoint requires authentication - may need homey.zone.readonly permission")
                                 continue
                             elif response.status == 403:
-                                _LOGGER.debug("Zones endpoint forbidden - API key may not have zone:read permission")
+                                _LOGGER.debug("Zones endpoint forbidden - API key may not have homey.zone.readonly permission")
                                 continue
                     except Exception as err:
                         _LOGGER.debug("Error fetching zones from %s: %s", zone_endpoint, err)
                         continue
                 
                 if not zones_fetched:
-                    _LOGGER.info("Could not fetch zones/rooms from Homey. Devices will be shown without room grouping. This may require zone:read permission in your API key.")
+                    _LOGGER.info("Could not fetch zones/rooms from Homey. Devices will be shown without room grouping. This may require homey.zone.readonly permission in your API key.")
                     zones = {}
         except Exception as err:
             _LOGGER.error("Failed to fetch devices: %s", err)
@@ -570,7 +667,7 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
                         continue
                 
                 # Try to get zones (rooms)
-                # Note: Zones may require additional API permissions (zone:read)
+                # Note: Zones may require additional API permissions (homey.zone.readonly)
                 # If zones can't be fetched, we'll proceed without room grouping
                 zone_endpoints = [
                     f"{self.host}/api/manager/zones/zone/",
@@ -593,17 +690,17 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
                                 _LOGGER.debug("Successfully fetched zones from %s", zone_endpoint)
                                 break
                             elif response.status == 401:
-                                _LOGGER.debug("Zones endpoint requires authentication - may need zone:read permission")
+                                _LOGGER.debug("Zones endpoint requires authentication - may need homey.zone.readonly permission")
                                 continue
                             elif response.status == 403:
-                                _LOGGER.debug("Zones endpoint forbidden - API key may not have zone:read permission")
+                                _LOGGER.debug("Zones endpoint forbidden - API key may not have homey.zone.readonly permission")
                                 continue
                     except Exception as err:
                         _LOGGER.debug("Error fetching zones from %s: %s", zone_endpoint, err)
                         continue
                 
                 if not zones_fetched:
-                    _LOGGER.info("Could not fetch zones/rooms from Homey. Devices will be shown without room grouping. This may require zone:read permission in your API key.")
+                    _LOGGER.info("Could not fetch zones/rooms from Homey. Devices will be shown without room grouping. This may require homey.zone.readonly permission in your API key.")
                     zones = {}
         except Exception as err:
             _LOGGER.error("Failed to fetch devices: %s", err)

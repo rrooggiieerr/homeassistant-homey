@@ -15,6 +15,7 @@ from homeassistant.const import (
     UnitOfPower,
     UnitOfPressure,
     UnitOfTemperature,
+    UnitOfFrequency,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -72,6 +73,77 @@ CAPABILITY_TO_SENSOR = {
         "device_class": SensorDeviceClass.CO,
         "state_class": SensorStateClass.MEASUREMENT,
         "unit": "ppm",
+    },
+    # Additional sensor capabilities
+    "measure_noise": {
+        "device_class": SensorDeviceClass.SOUND_PRESSURE,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": "dB",
+    },
+    "measure_rain": {
+        "device_class": None,  # Generic sensor
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": "mm",
+    },
+    "measure_wind_strength": {
+        "device_class": None,  # Generic sensor
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": "m/s",
+    },
+    "measure_wind_angle": {
+        "device_class": None,  # Generic sensor
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": "°",
+    },
+    "measure_ultraviolet": {
+        "device_class": None,  # Generic sensor
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": "UV index",
+    },
+    "measure_pm25": {
+        "device_class": SensorDeviceClass.PM25,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": "µg/m³",
+    },
+    "measure_pm10": {
+        "device_class": SensorDeviceClass.PM10,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": "µg/m³",
+    },
+    "measure_voc": {
+        "device_class": None,  # Generic sensor
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": "µg/m³",
+    },
+    "measure_aqi": {
+        "device_class": None,  # Generic sensor
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": "AQI",
+    },
+    "measure_frequency": {
+        "device_class": None,  # Generic sensor
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": UnitOfFrequency.HERTZ,
+    },
+    "measure_gas": {
+        "device_class": None,  # Generic sensor
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": "ppm",
+    },
+    "measure_soil_moisture": {
+        "device_class": None,  # Generic sensor
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": "%",
+    },
+    "measure_soil_temperature": {
+        "device_class": SensorDeviceClass.TEMPERATURE,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": UnitOfTemperature.CELSIUS,
+    },
+    "measure_energy": {
+        "device_class": SensorDeviceClass.ENERGY,
+        "state_class": SensorStateClass.TOTAL_INCREASING,  # For energy consumption
+        "unit": UnitOfEnergy.KILO_WATT_HOUR,
     },
 }
 
@@ -138,6 +210,24 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
         """Return the state of the sensor."""
         device_data = self.coordinator.data.get(self._device_id, self._device)
         capabilities = device_data.get("capabilitiesObj", {})
-        value = capabilities.get(self._capability_id, {}).get("value")
-        return float(value) if value is not None else None
+        capability = capabilities.get(self._capability_id, {})
+        value = capability.get("value")
+        if value is None:
+            return None
+        
+        try:
+            value_float = float(value)
+            
+            # Check if this is a percentage sensor that might be normalized
+            # measure_humidity and measure_soil_moisture might return normalized 0-1
+            if self._capability_id in ("measure_humidity", "measure_soil_moisture"):
+                # Check capability max to determine if normalized
+                cap_max = capability.get("max", 100)
+                if cap_max <= 1.0:
+                    # Normalized value (0-1), convert to percentage (0-100)
+                    value_float = value_float * 100.0
+            
+            return value_float
+        except (ValueError, TypeError):
+            return None
 

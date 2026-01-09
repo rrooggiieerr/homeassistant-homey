@@ -13,6 +13,97 @@ _No unreleased changes yet._
 
 ---
 
+## [1.0.3] - 2026-01-10
+
+### 🎉 Major Feature Release: Scenes, Moods, and Enhanced Platforms
+
+**This version adds comprehensive support for Homey Scenes and Moods, physical device buttons, Number and Select platforms, flow management services, and extensive sensor/binary sensor capabilities. It also includes a robust permission checking system and improved error handling.**
+
+### Added
+
+#### New Platforms
+- **Scene Platform** - Homey scenes now appear as Scene entities in Home Assistant
+- **Moods Support** - Homey moods are exposed as Scene entities with distinct icons
+- **Number Platform** - Ready for numeric control capabilities (placeholder for future capabilities)
+- **Select Platform** - Ready for mode/option selection capabilities (placeholder for future capabilities)
+- **Physical Device Buttons** - Physical device buttons (`button`, `button.1`, etc.) now appear as Button entities
+
+#### Enhanced Sensor Capabilities
+- **Additional Sensor Types**: Noise (dB), Rain (mm), Wind Strength/Angle (m/s, °), Ultraviolet (UV index), PM2.5/PM10 (µg/m³), VOC (µg/m³), AQI, Frequency (Hz), Gas (ppm), Soil Moisture/Temperature (%, °C), Energy (kWh)
+- **Proper State Classes**: Energy sensors now use `TOTAL_INCREASING` state class for proper energy tracking
+
+#### Enhanced Binary Sensor Capabilities
+- **Additional Alarm Types**: Gas, Fire, Panic, Burglar, Generic, Maintenance alarms
+- **Physical Buttons**: Button capabilities detected as binary sensors
+- **Vibration Detection**: Vibration sensor support
+
+#### Climate Enhancements
+- **Humidity Support**: Added current and target humidity properties with proper unit conversion
+- **HVAC Mode Detection**: Dynamic HVAC mode detection based on available thermostat capabilities (`thermostat_mode_off`, `thermostat_mode_heat`, `thermostat_mode_cool`, `thermostat_mode_auto`)
+- **Mode Support**: Full support for OFF, HEAT, COOL, AUTO, and HEAT_COOL modes
+
+#### Media Player Enhancements
+- **Rich Metadata**: Added support for artist, album, track name, duration, position
+- **Playback Controls**: Added shuffle and repeat state support
+- **Position Tracking**: Media position with timestamp tracking
+
+#### Flow Management
+- **Flow Enable/Disable Services**: Added `homey.enable_flow` and `homey.disable_flow` services
+- **Service Flexibility**: Both services support `flow_id` or `flow_name` parameters
+
+#### Permission System
+- **Comprehensive Permission Checking**: Added permission validation system that checks API permissions for all features
+- **Graceful Degradation**: Integration continues to work even when permissions are missing - features are simply disabled
+- **Clear Warnings**: Detailed log messages inform users about missing permissions and their impact
+- **Permission Documentation**: Updated README with complete permission requirements and impact table
+
+### Fixed
+- **Humidity Conversions** - Fixed handling of normalized (0-1) vs percentage (0-100) humidity values in sensors and climate controls
+- **Climate Initialization Bug** - Fixed `capabilities` variable used before definition in climate platform
+- **Migration Buttons** - Filtered out internal Homey migration capabilities (`button.migrate_v3`, `button.reset_meter`, `button.identify`) from appearing as button entities
+- **Empty Feature Handling** - Integration now gracefully handles cases where users have permissions but no features configured (e.g., moods permission but no moods)
+- **Entity Registry Method** - Fixed `AttributeError` when removing devices by replacing non-existent `async_entries_for_device` with proper entity registry iteration
+- **Authentication Error Detection** - Improved error handling to correctly identify authentication failures (401) vs connection issues, providing clearer error messages
+- **Light Color Sync** - Fixed incorrect color values on startup by refreshing device state when entities are first added to Home Assistant
+- **Button Platform Indentation** - Fixed syntax error in button platform that prevented integration from loading
+- **Thermostat Temperature Control** - Fixed thermostat temperature setting to handle all parameter formats (`temperature`, `target_temperature_high`, `target_temperature_low`) and added default min/max temperatures for proper UI controls
+- **Flows Device Removal** - Fixed virtual "flows" device being incorrectly removed by device cleanup logic when device filtering is enabled
+- **Flow Logging** - Improved flow discovery logging to show enabled vs disabled flows and help diagnose flow visibility issues
+
+### Changed
+- **Permission Names** - Updated all permission references to use correct Homey API v3 permission names (`homey.device.readonly`, `homey.flow.start`, etc.)
+- **Error Handling** - Improved distinction between permission errors (401/403) and missing features (empty results)
+- **Logging** - More informative log messages that distinguish between permission issues and normal empty results
+- **Scene/Mood Detection** - Scenes and moods are now properly detected and exposed, with moods using distinct icons
+
+### Technical Details
+
+#### Permission Mapping
+- `homey.device.readonly` - Required for device discovery and reading states
+- `homey.device.control` - Required for device control
+- `homey.zone.readonly` - Recommended for room/area organization
+- `homey.flow.readonly` - Recommended for flow listing
+- `homey.flow.start` - Recommended for flow triggering and management
+- `homey.mood.readonly` - Recommended for mood listing
+- `homey.mood.set` - Recommended for mood activation
+- Scenes use device permissions (no separate scene permissions in Homey API v3)
+
+#### Humidity Conversion Logic
+- Automatically detects if humidity values are normalized (0-1) or percentage (0-100) based on capability `max` value
+- Converts normalized values to percentage when reading
+- Converts percentage to normalized values when writing
+- Applies to both `measure_humidity` sensors and `target_humidity` climate controls
+
+#### Feature Availability Handling
+- Empty results (200 OK with empty data) are treated as normal - user just doesn't have that feature configured
+- Permission errors (401/403) trigger warnings and disable features
+- 404 errors are treated as feature not available on this Homey version
+- Integration never breaks due to missing features or permissions
+
+**Impact**: This release significantly expands the integration's capabilities, adding support for scenes, moods, and many new sensor types. The permission system ensures users understand what features require which permissions, and the integration gracefully handles all edge cases.
+
+---
+
 ## [1.0.2] - 2026-01-09
 
 ### 🚀 Major Fix: Flow Support for Homey Pro 2026

@@ -4,7 +4,7 @@
 [![GitHub issues](https://img.shields.io/github/issues/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/issues)
 [![GitHub stars](https://img.shields.io/github/stars/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/stargazers)
 
-**Version**: 1.0.2 | **Last Updated**: 2026-01-09 | [Changelog](CHANGELOG.md)
+**Version**: 1.0.3 | **Last Updated**: 2026-01-10 | [Changelog](CHANGELOG.md)
 
 A Home Assistant integration that automatically discovers and connects all your Homey devices, making them available natively in Home Assistant.
 
@@ -17,17 +17,21 @@ This integration bridges your [Homey](https://homey.app) hub with Home Assistant
 ## Features
 
 - 🔍 **Automatic Device Discovery**: Automatically discovers all devices from your Homey hub
-- 💡 **Multiple Entity Types**: Supports lights, switches, sensors, binary sensors, covers, climate devices, fans, locks, and media players
+- 💡 **Multiple Entity Types**: Supports lights, switches, sensors, binary sensors, covers, climate devices, fans, locks, media players, scenes, buttons, numbers, and selects
 - 🎨 **Full Light Control**: Supports dimming, color (HS), and color temperature control
-- 📊 **Comprehensive Sensors**: Temperature, humidity, pressure, power, voltage, current, luminance, CO2, and CO
-- 🚨 **Security Sensors**: Motion, contact, tamper, smoke, CO alarm, CO2 alarm, water leak, and battery sensors
-- 🌡️ **Climate Control**: Thermostat support with target temperature control
-- 🎬 **Homey Flows**: Trigger your Homey automations (Standard and Advanced Flows) from Home Assistant as button entities or via service calls
+- 📊 **Comprehensive Sensors**: Temperature, humidity, pressure, power, voltage, current, luminance, CO2, CO, noise, rain, wind, UV, PM2.5/PM10, VOC, AQI, frequency, gas, soil moisture/temperature, and energy
+- 🚨 **Security Sensors**: Motion, contact, tamper, smoke, CO alarm, CO2 alarm, water leak, battery, gas, fire, panic, burglar, and vibration sensors
+- 🌡️ **Climate Control**: Thermostat support with target temperature and humidity control, plus HVAC mode support (OFF, HEAT, COOL, AUTO, HEAT_COOL)
+- 🎬 **Homey Flows**: Trigger, enable, and disable your Homey automations (Standard and Advanced Flows) from Home Assistant as button entities or via service calls
+- 🎭 **Scenes & Moods**: Activate Homey scenes and moods directly from Home Assistant
+- 🔘 **Physical Buttons**: Physical device buttons appear as Button entities for automation triggers
+- 🎵 **Media Player Metadata**: Full media metadata support including artist, album, track, duration, position, shuffle, and repeat
 - 🏠 **Room Organization**: Automatically assigns devices to Home Assistant Areas based on Homey rooms
 - 🔄 **Automatic Synchronization**: Automatically syncs device changes from Homey (renames, room changes, deletions)
 - 📡 **Fast Status Updates**: Immediate status updates after changes (1-2 seconds), with background polling every 10 seconds
 - ⚙️ **Easy Setup**: Simple configuration flow through Home Assistant's UI
 - 🎯 **Smart Device Grouping**: All entities from the same device are automatically grouped under one device entry
+- 🔐 **Permission Management**: Comprehensive permission checking with graceful degradation - integration works even with limited permissions
 
 ## Prerequisites
 
@@ -39,22 +43,34 @@ Before installing the integration, you need to create an API Key in Homey:
 4. Give it a name (e.g., "Home Assistant")
 5. Select the necessary permissions:
 
-   **Devices:**
-   - **View devices** - **Required** to read device states
-   - **Control devices** - **Required** to control devices
+   **Required Permissions:**
+   - **View devices** (`homey.device.readonly`) - **Required** to read device states and discover devices
+   - **Control devices** (`homey.device.control`) - **Required** to control devices (turn on/off, set brightness, etc.)
    
-   **Flows:**
-   - **View Flows** - **Required** to list Flows (needed for Flow button entities and service calls using flow names)
-   - **Start Flows** - **Required** to trigger Flows (needed to actually execute Flows)
+   **Recommended Permissions:**
+   - **View Zones** (`homey.zone.readonly`) - **Recommended** for room/area organization. Without this, devices won't be organized by Homey rooms.
+   - **View Flows** (`homey.flow.readonly`) - **Recommended** to list Flows (needed for Flow button entities and service calls using flow names)
+   - **Start Flows** (`homey.flow.start`) - **Recommended** to trigger, enable, and disable Flows
+   - **View Moods** (`homey.mood.readonly`) - **Recommended** to list Moods (needed for Mood entities)
+   - **Set Moods** (`homey.mood.set`) - **Recommended** to trigger Moods
    
-   **Zones:**
-   - **View Zones** - **Optional**, but recommended for room/area organization
+   **Note on Scenes**: Scenes in Homey API v3 may not have separate permissions. Scene listing and activation likely use `homey.device.readonly` and `homey.device.control` permissions.
 
 6. Copy the API Key (you won't be able to see it again!)
 
-**Notes**: 
-- If you don't grant **View Zones** permission, devices will still be imported but won't be organized by Homey rooms. They will appear without room grouping in the device selection dialog.
-- If you don't grant **View Flows** and **Start Flows** permissions, Flow support will be disabled. No Flow button entities will be created, and the `homey.trigger_flow` service will not work.
+**Permission Impact:**
+
+| Permission | Impact if Missing |
+|-----------|-------------------|
+| `homey.device.readonly` | ❌ **Integration will not work** - Cannot discover or read devices |
+| `homey.device.control` | ⚠️ **Device control disabled** - Cannot turn devices on/off, change settings, etc. |
+| `homey.zone.readonly` | ⚠️ **No room organization** - Devices won't be grouped by Homey rooms/areas |
+| `homey.flow.readonly` | ⚠️ **Flow listing disabled** - Flow button entities won't be created |
+| `homey.flow.start` | ⚠️ **Flow control disabled** - Cannot trigger, enable, or disable flows |
+| `homey.mood.readonly` | ⚠️ **Mood listing disabled** - Mood entities won't be created |
+| `homey.mood.set` | ⚠️ **Mood activation disabled** - Cannot activate moods |
+
+**Note**: The integration will log warnings in Home Assistant's logs when permissions are missing, but it won't break. Features requiring missing permissions will simply be disabled.
 
 **Important**: Keep this API Key safe - you'll need it during the setup process!
 
@@ -264,11 +280,11 @@ Once configured, all your Homey devices will appear in Home Assistant under **Se
 
 ### Homey Flows (Automations)
 
-**Prerequisites**: Flow support requires **View Flows** and **Start Flows** permissions in your API key. Without these permissions, Flow button entities will not be created and the `homey.trigger_flow` service will not work.
+**Prerequisites**: Flow support requires **View Flows** (`homey.flow.readonly`) and **Start Flows** (`homey.flow.start`) permissions in your API key. Without these permissions, Flow button entities will not be created and flow services will not work.
 
 **Supported Flow Types**: The integration supports both **Standard Flows** and **Advanced Flows** from Homey. Both types will appear as button entities and can be triggered via service calls.
 
-The integration exposes your Homey Flows in two ways:
+The integration exposes your Homey Flows in three ways:
 
 #### 1. Button Entities
 
@@ -278,11 +294,11 @@ Each enabled Homey Flow (both Standard and Advanced) appears as a button entity 
 
 **Note**: Flows are automatically discovered from both Standard and Advanced Flow endpoints. Disabled flows will not appear as button entities.
 
-#### 2. Service Call
+#### 2. Service Calls
 
-You can trigger Flows from automations, scripts, or the Developer Tools:
+You can trigger, enable, and disable Flows from automations, scripts, or the Developer Tools:
 
-**Service**: `homey.trigger_flow`
+**Trigger Flow Service**: `homey.trigger_flow`
 
 **Service Data**:
 ```yaml
@@ -291,6 +307,28 @@ flow_id: "1234567890abcdef"
 
 # OR trigger by Flow name
 flow_name: "Turn on all lights"
+```
+
+**Enable Flow Service**: `homey.enable_flow`
+
+**Service Data**:
+```yaml
+# Enable by Flow ID
+flow_id: "1234567890abcdef"
+
+# OR enable by Flow name
+flow_name: "My Flow"
+```
+
+**Disable Flow Service**: `homey.disable_flow`
+
+**Service Data**:
+```yaml
+# Disable by Flow ID
+flow_id: "1234567890abcdef"
+
+# OR disable by Flow name
+flow_name: "My Flow"
 ```
 
 **Example Automation**:
@@ -305,6 +343,30 @@ automation:
         data:
           flow_name: "Evening Scene"
 ```
+
+### Homey Scenes and Moods
+
+**Prerequisites**: 
+- **Scenes**: Use `homey.device.readonly` and `homey.device.control` permissions (scenes don't have separate permissions in Homey API v3)
+- **Moods**: Require **View Moods** (`homey.mood.readonly`) and **Set Moods** (`homey.mood.set`) permissions
+
+**Scene Platform**: All your Homey scenes appear as Scene entities in Home Assistant. Simply activate them like any other scene.
+
+**Mood Support**: Homey moods are also exposed as Scene entities, but with a distinct icon (😊) to differentiate them from regular scenes.
+
+**Entity ID format**: 
+- Scenes: `scene.<scene_name>`
+- Moods: `scene.<mood_name>` (with mood icon)
+
+**Note**: If you don't have any scenes or moods configured in Homey, no entities will be created. This is normal and won't cause any errors.
+
+### Physical Device Buttons
+
+Physical device buttons (like Hue dimmer switches, IKEA remotes, etc.) are automatically detected and exposed as Button entities.
+
+**Entity ID format**: `button.<device_name>_button` or `button.<device_name>_button_<number>` for multi-button devices
+
+**Note**: Internal Homey migration capabilities are automatically filtered out and won't appear as buttons.
 
 ## Device Organization
 
@@ -361,7 +423,7 @@ The integration supports devices with the following capabilities:
 
 **Note**: HS color and color temperature modes are mutually exclusive. If both are available, HS color mode is preferred.
 
-**Color Control**: The integration automatically converts between Home Assistant's color format (hue 0-360°, saturation 0-100%) and Homey's normalized format (0-1). Color changes should work reliably for all supported lights.
+**Color Control**: The integration automatically converts between Home Assistant's color format (hue 0-360°, saturation 0-100%) and Homey's normalized format (0-1). Color changes work reliably for all supported lights, and colors sync correctly on startup by refreshing device state when entities are first added.
 
 ### Switches
 - `onoff` - On/off control
@@ -378,6 +440,20 @@ The integration supports devices with the following capabilities:
 - `measure_luminance` - Light level sensor (lux)
 - `measure_co2` - CO2 sensor (ppm)
 - `measure_co` - CO sensor (ppm)
+- `measure_noise` - Sound pressure sensor (dB)
+- `measure_rain` - Rainfall sensor (mm)
+- `measure_wind_strength` - Wind speed sensor (m/s)
+- `measure_wind_angle` - Wind direction sensor (°)
+- `measure_ultraviolet` - UV index sensor
+- `measure_pm25` - PM2.5 air quality sensor (µg/m³)
+- `measure_pm10` - PM10 air quality sensor (µg/m³)
+- `measure_voc` - Volatile Organic Compounds sensor (µg/m³)
+- `measure_aqi` - Air Quality Index sensor
+- `measure_frequency` - Frequency sensor (Hz)
+- `measure_gas` - Gas sensor (ppm)
+- `measure_soil_moisture` - Soil moisture sensor (%)
+- `measure_soil_temperature` - Soil temperature sensor (°C)
+- `measure_energy` - Energy consumption sensor (kWh) with proper state class for energy tracking
 
 ### Binary Sensors
 - `alarm_motion` - Motion detector
@@ -386,8 +462,16 @@ The integration supports devices with the following capabilities:
 - `alarm_smoke` - Smoke detector
 - `alarm_co` - CO alarm
 - `alarm_co2` - CO2 alarm
-- `alarm_water` - Water leak sensor
+- `alarm_water` - Water leak detector
 - `alarm_battery` - Low battery indicator
+- `alarm_gas` - Gas alarm
+- `alarm_fire` - Fire alarm
+- `alarm_panic` - Panic alarm
+- `alarm_burglar` - Burglar alarm
+- `alarm_generic` - Generic alarm
+- `alarm_maintenance` - Maintenance required indicator
+- `button` - Physical button press detection
+- `vibration` - Vibration detection
 
 ### Covers
 - `windowcoverings_state` - Window covering position (0-100%)
@@ -395,7 +479,16 @@ The integration supports devices with the following capabilities:
 
 ### Climate
 - `target_temperature` - Target temperature control (°C)
-- `measure_temperature` - Current temperature (°C)
+- `target_humidity` - Target humidity control (%)
+- `measure_temperature` - Current temperature reading (°C)
+- `measure_humidity` - Current humidity reading (%)
+- `thermostat_mode` - HVAC mode control (off, heat, cool, auto)
+- `thermostat_mode_off` - Off mode capability
+- `thermostat_mode_heat` - Heat mode capability
+- `thermostat_mode_cool` - Cool mode capability
+- `thermostat_mode_auto` - Auto mode capability
+
+**Supported HVAC Modes**: OFF, HEAT, COOL, AUTO, HEAT_COOL (automatically detected based on available capabilities)
 
 ### Fans
 - `fan_speed` - Fan speed control (0-100%)
@@ -408,8 +501,32 @@ The integration supports devices with the following capabilities:
 - `volume_set` - Volume control (0-100%)
 - `volume_mute` - Mute control
 - `speaker_playing` - Play/pause control
-- `speaker_next` - Next track
-- `speaker_prev` - Previous track
+- `speaker_next` - Next track control
+- `speaker_prev` - Previous track control
+- `speaker_artist` - Current artist name
+- `speaker_album` - Current album name
+- `speaker_track` - Current track title
+- `speaker_duration` - Track duration (seconds)
+- `speaker_position` - Current playback position (seconds)
+- `speaker_shuffle` - Shuffle state
+- `speaker_repeat` - Repeat state
+
+### Scenes
+- All Homey scenes appear as Scene entities
+- Activate scenes directly from Home Assistant
+
+### Moods
+- All Homey moods appear as Scene entities (with distinct icon)
+- Activate moods directly from Home Assistant
+
+### Buttons
+- `button` - Single button device
+- `button.1`, `button.2`, etc. - Multi-button devices
+- Physical device buttons appear as Button entities for automation triggers
+
+### Number & Select Platforms
+- Ready for future capabilities that require numeric input or option selection
+- Currently placeholder platforms - will be populated as new capabilities are identified
 
 ## Known Issues & Limitations
 

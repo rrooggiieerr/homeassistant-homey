@@ -22,6 +22,8 @@ API_CAPABILITIES = f"{API_BASE_MANAGER}/capabilities/capability"
 API_FLOWS = f"{API_BASE_MANAGER}/flow/flow"  # Standard flows: singular "flow" not "flows"
 API_ADVANCED_FLOWS = f"{API_BASE_MANAGER}/flow/advancedflow"  # Advanced flows endpoint
 API_ZONES = f"{API_BASE_MANAGER}/zones/zone"  # Rooms/zones in Homey
+API_SCENES = f"{API_BASE_MANAGER}/scene/scene"  # Scenes endpoint
+API_MOODS = f"{API_BASE_MANAGER}/mood/mood"  # Moods endpoint
 
 # Device capability mappings to HA platforms
 CAPABILITY_TO_PLATFORM = {

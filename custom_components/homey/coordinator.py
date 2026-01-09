@@ -182,7 +182,11 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             
             if device_entry:
                 # Remove all entities for this device
-                entities = entity_registry.async_entries_for_device(device_entry.id)
+                entities = [
+                    entry
+                    for entry in entity_registry.entities.values()
+                    if entry.device_id == device_entry.id
+                ]
                 for entity_entry in entities:
                     entity_registry.async_remove(entity_entry.entity_id)
                 
@@ -216,12 +220,20 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         # We need to check devices that belong to this config entry
         devices_to_remove = []
         
+        # Virtual devices that should never be removed (not real devices from Homey)
+        virtual_devices = {"flows"}  # "flows" is a virtual device for flow buttons
+        
         # Get all devices and check which ones belong to our integration
         for device_entry in device_registry.devices.values():
             # Check if this device belongs to our integration and this config entry
             for identifier in device_entry.identifiers:
                 if identifier[0] == DOMAIN:
                     device_id = identifier[1]
+                    
+                    # Skip virtual devices - they should never be removed
+                    if device_id in virtual_devices:
+                        break
+                    
                     # Check if this device is associated with our config entry
                     # and if it's not in the filter
                     if device_id not in device_filter_set:
@@ -246,7 +258,11 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 
                 if still_ours:
                     # Remove all entities for this device
-                    entities = entity_registry.async_entries_for_device(device_entry_id)
+                    entities = [
+                        entry
+                        for entry in entity_registry.entities.values()
+                        if entry.device_id == device_entry_id
+                    ]
                     for entity_entry in entities:
                         entity_registry.async_remove(entity_entry.entity_id)
                     

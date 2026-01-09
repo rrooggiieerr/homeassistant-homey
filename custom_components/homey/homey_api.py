@@ -18,7 +18,10 @@ from .const import (
     API_ADVANCED_FLOWS,
     API_SYSTEM,
     API_ZONES,
+    API_SCENES,
+    API_MOODS,
 )
+from .permissions import PermissionChecker
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,6 +39,8 @@ class HomeyAPI:
         self.devices: dict[str, dict[str, Any]] = {}
         self.flows: dict[str, dict[str, Any]] = {}
         self.zones: dict[str, dict[str, Any]] = {}  # Rooms/zones
+        self.scenes: dict[str, dict[str, Any]] = {}  # Scenes
+        self.moods: dict[str, dict[str, Any]] = {}  # Moods
         self._listeners: list[Callable[[str, dict[str, Any]], None]] = []
 
     async def connect(self) -> None:
@@ -256,6 +261,11 @@ class HomeyAPI:
                         elif response.status == 404:
                             _LOGGER.debug("Capability endpoint %s not found, trying next...", endpoint)
                             continue
+                        elif response.status in (401, 403):
+                            PermissionChecker.check_permission(
+                                response.status, "devices", "write", f"set_capability({capability_id})"
+                            )
+                            continue
                         else:
                             error_text = await response.text()
                             _LOGGER.info(
@@ -279,6 +289,11 @@ class HomeyAPI:
                             return True
                         elif response.status == 404:
                             _LOGGER.debug("Capability endpoint %s not found, trying next...", endpoint)
+                            continue
+                        elif response.status in (401, 403):
+                            PermissionChecker.check_permission(
+                                response.status, "devices", "write", f"set_capability({capability_id})"
+                            )
                             continue
                         else:
                             error_text = await response.text()
@@ -449,11 +464,11 @@ class HomeyAPI:
                         break
                     elif response.status == 401:
                         auth_error_count += 1
-                        _LOGGER.warning("Authentication failed (401) for flows endpoint %s - check flow:read permission", endpoint)
+                        _LOGGER.warning("Authentication failed (401) for flows endpoint %s - check homey.flow.readonly permission", endpoint)
                         continue
                     elif response.status == 403:
                         auth_error_count += 1
-                        _LOGGER.warning("Forbidden (403) for flows endpoint %s - check flow:read permission", endpoint)
+                        _LOGGER.warning("Forbidden (403) for flows endpoint %s - check homey.flow.readonly permission", endpoint)
                         continue
                     elif response.status == 404:
                         continue
@@ -507,8 +522,14 @@ class HomeyAPI:
             return self.flows
         
         # If all endpoints returned 401/403, it's a permission issue
-        if auth_error_count > 0:
-            _LOGGER.error("All flows endpoints returned authentication errors (401/403). Please check that your API key has 'flow:read' permission enabled in Homey Settings → API Keys.")
+        total_endpoints = len(endpoints_to_try) + len(advanced_endpoints_to_try)
+        if auth_error_count > 0 and auth_error_count == total_endpoints:
+            _LOGGER.error("All flows endpoints returned authentication errors (401/403). Please check that your API key has 'homey.flow.readonly' permission enabled in Homey Settings → API Keys.")
+        elif auth_error_count > 0:
+            _LOGGER.warning("Some flows endpoints returned authentication errors. Please check that your API key has 'homey.flow.readonly' permission enabled in Homey Settings → API Keys.")
+        else:
+            # No auth errors but no flows - user just doesn't have flows configured or feature not available
+            _LOGGER.debug("No flows found - this is normal if you don't have any flows configured in Homey")
         return {}
 
     async def trigger_flow(self, flow_id: str) -> bool:
@@ -591,6 +612,7 @@ class HomeyAPI:
             f"{API_BASE_V1}/zone",  # /api/v1/zone
         ]
 
+        auth_error_count = 0
         for endpoint in endpoints_to_try:
             try:
                 async with self.session.get(f"{self.host}{endpoint}") as response:
@@ -599,13 +621,25 @@ class HomeyAPI:
                         # Handle both array and object responses
                         if isinstance(zones_data, dict):
                             self.zones = zones_data
-                        else:
+                        elif isinstance(zones_data, list):
                             # If it's an array, convert to dict keyed by id
                             self.zones = {zone["id"]: zone for zone in zones_data}
-                        _LOGGER.info("Successfully retrieved zones using endpoint: %s", endpoint)
+                        else:
+                            # Empty or unexpected response
+                            self.zones = {}
+                        
+                        # If we got a successful response but no zones, that's OK - user just doesn't have zones
+                        if not self.zones:
+                            _LOGGER.debug("Zones endpoint returned empty result - no zones/rooms configured in Homey")
+                        else:
+                            _LOGGER.info("Successfully retrieved %d zones using endpoint: %s", len(self.zones), endpoint)
                         return self.zones
                     elif response.status == 404:
                         _LOGGER.debug("Zones endpoint %s not found, trying next...", endpoint)
+                        continue
+                    elif response.status in (401, 403):
+                        auth_error_count += 1
+                        PermissionChecker.check_permission(response.status, "zones", "read", "get_zones")
                         continue
                     else:
                         _LOGGER.debug("Failed to get zones from %s: %s", endpoint, response.status)
@@ -614,8 +648,295 @@ class HomeyAPI:
                 _LOGGER.debug("Error getting zones from %s: %s", endpoint, err)
                 continue
 
-        _LOGGER.warning("Failed to get zones from any endpoint")
+        # Only log permission warning if we got auth errors, not if endpoints just don't exist
+        if auth_error_count > 0:
+            _LOGGER.warning("Failed to get zones from any endpoint - permission issue")
+            PermissionChecker.log_missing_permission(
+                "zones",
+                "read",
+                "Devices will not be organized by Homey rooms/areas. They will appear without room grouping.",
+            )
+        else:
+            _LOGGER.debug("Zones endpoint not available - zones may not be supported or configured on this Homey")
         return {}
+
+    async def get_scenes(self) -> dict[str, dict[str, Any]]:
+        """Get all scenes from Homey."""
+        if not self.session:
+            return {}
+
+        endpoints_to_try = [
+            API_SCENES,  # /api/manager/scene/scene
+            f"{API_SCENES}/",  # With trailing slash
+            f"{API_BASE_MANAGER}/scenes/scene",  # Plural variation
+            f"{API_BASE_MANAGER}/scenes/scene/",  # With trailing slash
+            f"{API_BASE_V1}/scene",  # V1 endpoint
+            f"{API_BASE_V1}/scene/",  # With trailing slash
+        ]
+
+        auth_error_count = 0
+        for endpoint in endpoints_to_try:
+            try:
+                async with self.session.get(f"{self.host}{endpoint}") as response:
+                    if response.status == 200:
+                        scenes_data = await response.json()
+                        # Handle both array and object responses
+                        if isinstance(scenes_data, dict):
+                            self.scenes = scenes_data
+                        elif isinstance(scenes_data, list):
+                            # If it's an array, convert to dict keyed by id
+                            self.scenes = {scene["id"]: scene for scene in scenes_data}
+                        else:
+                            # Empty or unexpected response - feature may not be available
+                            self.scenes = {}
+                        
+                        # If we got a successful response but no scenes, that's OK - user just doesn't have scenes
+                        if not self.scenes:
+                            _LOGGER.debug("Scenes endpoint returned empty result - no scenes configured in Homey")
+                        else:
+                            _LOGGER.info("Successfully retrieved %d scenes using endpoint: %s", len(self.scenes), endpoint)
+                        return self.scenes
+                    elif response.status == 404:
+                        _LOGGER.debug("Scenes endpoint %s not found, trying next...", endpoint)
+                        continue
+                    elif response.status in (401, 403):
+                        auth_error_count += 1
+                        PermissionChecker.check_permission(response.status, "scenes", "read", "get_scenes")
+                        continue
+                    else:
+                        _LOGGER.debug("Failed to get scenes from %s: %s", endpoint, response.status)
+                        continue
+            except Exception as err:
+                _LOGGER.debug("Error getting scenes from %s: %s", endpoint, err)
+                continue
+
+        # Only log permission warning if we got auth errors, not if endpoints just don't exist
+        if auth_error_count > 0:
+            _LOGGER.warning("Failed to get scenes from any endpoint - permission issue")
+            PermissionChecker.log_missing_permission(
+                "scenes",
+                "read",
+                "Scene entities will not be created. You won't be able to activate Homey scenes from Home Assistant.",
+            )
+        else:
+            _LOGGER.debug("Scenes endpoint not available - scenes may not be supported or configured on this Homey")
+        return {}
+
+    async def trigger_scene(self, scene_id: str) -> bool:
+        """Trigger a scene by ID."""
+        if not self.session:
+            return False
+
+        endpoints_to_try = [
+            f"{API_SCENES}/{scene_id}/trigger",  # /api/manager/scene/scene/{id}/trigger
+            f"{API_SCENES}/{scene_id}/trigger/",  # With trailing slash
+            f"{API_BASE_MANAGER}/scenes/scene/{scene_id}/trigger",  # Plural variation
+            f"{API_BASE_V1}/scene/{scene_id}/trigger",  # V1 endpoint
+            f"{API_SCENES}/{scene_id}/run",  # Alternative trigger method
+            f"{API_SCENES}/{scene_id}/activate",  # Alternative activate method
+        ]
+
+        for endpoint in endpoints_to_try:
+            try:
+                async with self.session.post(f"{self.host}{endpoint}") as response:
+                    if response.status == 200 or response.status == 204:
+                        _LOGGER.debug("Successfully triggered scene %s via %s", scene_id, endpoint)
+                        return True
+                    elif response.status == 404:
+                        continue
+                    elif response.status in (401, 403):
+                        PermissionChecker.check_permission(response.status, "scenes", "write", f"trigger_scene({scene_id})")
+                        continue
+                    else:
+                        continue
+            except Exception as err:
+                _LOGGER.debug("Error triggering scene %s via %s: %s", scene_id, endpoint, err)
+                continue
+
+        _LOGGER.error("Failed to trigger scene %s from any endpoint", scene_id)
+        return False
+
+    async def get_moods(self) -> dict[str, dict[str, Any]]:
+        """Get all moods from Homey."""
+        if not self.session:
+            return {}
+
+        endpoints_to_try = [
+            API_MOODS,  # /api/manager/mood/mood
+            f"{API_MOODS}/",  # With trailing slash
+            f"{API_BASE_MANAGER}/moods/mood",  # Plural variation
+            f"{API_BASE_MANAGER}/moods/mood/",  # With trailing slash
+            f"{API_BASE_V1}/mood",  # V1 endpoint
+            f"{API_BASE_V1}/mood/",  # With trailing slash
+        ]
+
+        auth_error_count = 0
+        for endpoint in endpoints_to_try:
+            try:
+                async with self.session.get(f"{self.host}{endpoint}") as response:
+                    if response.status == 200:
+                        moods_data = await response.json()
+                        # Handle both array and object responses
+                        if isinstance(moods_data, dict):
+                            self.moods = moods_data
+                        elif isinstance(moods_data, list):
+                            # If it's an array, convert to dict keyed by id
+                            self.moods = {mood["id"]: mood for mood in moods_data}
+                        else:
+                            # Empty or unexpected response - feature may not be available
+                            self.moods = {}
+                        
+                        # If we got a successful response but no moods, that's OK - user just doesn't have moods
+                        if not self.moods:
+                            _LOGGER.debug("Moods endpoint returned empty result - no moods configured in Homey")
+                        else:
+                            _LOGGER.info("Successfully retrieved %d moods using endpoint: %s", len(self.moods), endpoint)
+                        return self.moods
+                    elif response.status == 404:
+                        _LOGGER.debug("Moods endpoint %s not found, trying next...", endpoint)
+                        continue
+                    elif response.status in (401, 403):
+                        auth_error_count += 1
+                        PermissionChecker.check_permission(response.status, "moods", "read", "get_moods")
+                        continue
+                    else:
+                        _LOGGER.debug("Failed to get moods from %s: %s", endpoint, response.status)
+                        continue
+            except Exception as err:
+                _LOGGER.debug("Error getting moods from %s: %s", endpoint, err)
+                continue
+
+        # Only log permission warning if we got auth errors, not if endpoints just don't exist or feature isn't configured
+        if auth_error_count > 0:
+            _LOGGER.warning("Failed to get moods from any endpoint - permission issue")
+            PermissionChecker.log_missing_permission(
+                "moods",
+                "read",
+                "Mood entities will not be created. You won't be able to activate Homey moods from Home Assistant.",
+            )
+        else:
+            _LOGGER.debug("Moods endpoint not available - moods may not be supported or configured on this Homey")
+        return {}
+
+    async def trigger_mood(self, mood_id: str) -> bool:
+        """Trigger a mood by ID."""
+        if not self.session:
+            return False
+
+        endpoints_to_try = [
+            f"{API_MOODS}/{mood_id}/trigger",  # /api/manager/mood/mood/{id}/trigger
+            f"{API_MOODS}/{mood_id}/trigger/",  # With trailing slash
+            f"{API_BASE_MANAGER}/moods/mood/{mood_id}/trigger",  # Plural variation
+            f"{API_BASE_V1}/mood/{mood_id}/trigger",  # V1 endpoint
+            f"{API_MOODS}/{mood_id}/run",  # Alternative trigger method
+            f"{API_MOODS}/{mood_id}/activate",  # Alternative activate method
+        ]
+
+        for endpoint in endpoints_to_try:
+            try:
+                async with self.session.post(f"{self.host}{endpoint}") as response:
+                    if response.status == 200 or response.status == 204:
+                        _LOGGER.debug("Successfully triggered mood %s via %s", mood_id, endpoint)
+                        return True
+                    elif response.status == 404:
+                        continue
+                    elif response.status in (401, 403):
+                        PermissionChecker.check_permission(response.status, "moods", "write", f"trigger_mood({mood_id})")
+                        continue
+                    else:
+                        continue
+            except Exception as err:
+                _LOGGER.debug("Error triggering mood %s via %s: %s", mood_id, endpoint, err)
+                continue
+
+        _LOGGER.error("Failed to trigger mood %s from any endpoint", mood_id)
+        return False
+
+    async def enable_flow(self, flow_id: str) -> bool:
+        """Enable a flow by ID."""
+        if not self.session:
+            return False
+
+        # Try to enable flow via PUT/PATCH to flow endpoint
+        endpoints_to_try = [
+            (f"{API_FLOWS}/{flow_id}", "PATCH"),  # Standard flow
+            (f"{API_FLOWS}/{flow_id}/", "PATCH"),  # With trailing slash
+            (f"{API_ADVANCED_FLOWS}/{flow_id}", "PATCH"),  # Advanced flow
+            (f"{API_ADVANCED_FLOWS}/{flow_id}/", "PATCH"),  # With trailing slash
+            (f"{API_FLOWS}/{flow_id}", "PUT"),  # PUT method
+            (f"{API_ADVANCED_FLOWS}/{flow_id}", "PUT"),  # PUT method
+        ]
+
+        for endpoint, method in endpoints_to_try:
+            try:
+                url = f"{self.host}{endpoint}"
+                data = {"enabled": True}
+                
+                if method == "PATCH":
+                    async with self.session.patch(url, json=data) as response:
+                        if response.status in (200, 204):
+                            _LOGGER.debug("Successfully enabled flow %s", flow_id)
+                            return True
+                        elif response.status in (401, 403):
+                            PermissionChecker.check_permission(response.status, "flows", "write", f"enable_flow({flow_id})")
+                            continue
+                else:  # PUT
+                    async with self.session.put(url, json=data) as response:
+                        if response.status in (200, 204):
+                            _LOGGER.debug("Successfully enabled flow %s", flow_id)
+                            return True
+                        elif response.status in (401, 403):
+                            PermissionChecker.check_permission(response.status, "flows", "write", f"enable_flow({flow_id})")
+                            continue
+            except Exception as err:
+                _LOGGER.debug("Error enabling flow %s via %s: %s", flow_id, endpoint, err)
+                continue
+
+        _LOGGER.error("Failed to enable flow %s", flow_id)
+        return False
+
+    async def disable_flow(self, flow_id: str) -> bool:
+        """Disable a flow by ID."""
+        if not self.session:
+            return False
+
+        # Try to disable flow via PUT/PATCH to flow endpoint
+        endpoints_to_try = [
+            (f"{API_FLOWS}/{flow_id}", "PATCH"),  # Standard flow
+            (f"{API_FLOWS}/{flow_id}/", "PATCH"),  # With trailing slash
+            (f"{API_ADVANCED_FLOWS}/{flow_id}", "PATCH"),  # Advanced flow
+            (f"{API_ADVANCED_FLOWS}/{flow_id}/", "PATCH"),  # With trailing slash
+            (f"{API_FLOWS}/{flow_id}", "PUT"),  # PUT method
+            (f"{API_ADVANCED_FLOWS}/{flow_id}", "PUT"),  # PUT method
+        ]
+
+        for endpoint, method in endpoints_to_try:
+            try:
+                url = f"{self.host}{endpoint}"
+                data = {"enabled": False}
+                
+                if method == "PATCH":
+                    async with self.session.patch(url, json=data) as response:
+                        if response.status in (200, 204):
+                            _LOGGER.debug("Successfully disabled flow %s", flow_id)
+                            return True
+                        elif response.status in (401, 403):
+                            PermissionChecker.check_permission(response.status, "flows", "write", f"disable_flow({flow_id})")
+                            continue
+                else:  # PUT
+                    async with self.session.put(url, json=data) as response:
+                        if response.status in (200, 204):
+                            _LOGGER.debug("Successfully disabled flow %s", flow_id)
+                            return True
+                        elif response.status in (401, 403):
+                            PermissionChecker.check_permission(response.status, "flows", "write", f"disable_flow({flow_id})")
+                            continue
+            except Exception as err:
+                _LOGGER.debug("Error disabling flow %s via %s: %s", flow_id, endpoint, err)
+                continue
+
+        _LOGGER.error("Failed to disable flow %s", flow_id)
+        return False
 
     async def _on_device_update(self, data: dict[str, Any]) -> None:
         """Handle device update from Socket.IO."""
