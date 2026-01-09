@@ -13,7 +13,7 @@ _No unreleased changes yet._
 
 ---
 
-## [1.0.3] - 2026-01-10
+## [1.1.0] - 2026-01-11
 
 ### 🎉 Major Feature Release: Scenes, Moods, and Enhanced Platforms
 
