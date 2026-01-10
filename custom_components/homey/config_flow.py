@@ -9,13 +9,13 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST, CONF_TOKEN
+from homeassistant.const import CONF_HOST
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_DEVICE_FILTER, DOMAIN
+from .const import CONF_DEVICE_FILTER, CONF_TOKEN, DOMAIN
 from .device_info import get_device_type
 
 _LOGGER = logging.getLogger(__name__)
