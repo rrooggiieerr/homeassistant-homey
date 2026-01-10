@@ -9,8 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes yet._
+
+---
+
+## [1.1.2] - 2026-01-10
+
 ### Fixed
-- **Config Flow Validation Error** - Fixed "extra keys not allowed" error in config flow by importing `CONF_TOKEN` from local `const.py` instead of `homeassistant.const` (which doesn't include this constant). This resolves validation errors when adding the integration.
+- **Config Flow Validation Error** - Fixed "extra keys not allowed" error in config flow by importing `CONF_TOKEN` from local `const.py` instead of `homeassistant.const` (which doesn't include this constant). This resolves validation errors when adding the integration via HACS or manual installation.
 
 ---
 
