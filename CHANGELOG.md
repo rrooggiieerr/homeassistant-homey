@@ -9,7 +9,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes yet._
+---
+
+## [1.1.3] - 2026-01-11
+
+### 🎉 Major Device Classification and Capability Support Update
+
+**This version significantly improves device classification accuracy, adds comprehensive support for all Homey device classes and capabilities, fixes maintenance button filtering, adds multi-channel switch support, and includes enhanced troubleshooting documentation.**
+
+### Added
+
+#### Comprehensive Device Class Support
+- **All Homey Device Classes**: Added support for all Homey device classes including `light`, `socket`, `sensor`, `thermostat`, `speaker`, `tv`, `remote`, `windowcoverings`, `cover`, `garagedoor`, `curtain`, `blind`, `shutter`, `awning`, `lock`, `fan`, `camera`, `doorbell`, and `other`
+- **Device Class Priority**: Homey's `device_class` field is now used as the primary classification method for more reliable device type detection
+- **Garage Door Support**: Added support for `garagedoor_closed` capability (garage doors are now detected as covers)
+- **Window Coverings Variants**: Added support for `windowcoverings_set` capability (alternative to `windowcoverings_state`) for devices that use different capability names
+
+#### Multi-Channel Device Support
+- **Multi-Channel Switches**: Added support for multi-channel switches with sub-capabilities (e.g., `onoff.output1`, `onoff.output2`)
+- **Separate Switch Entities**: Multi-channel devices now create separate switch entities for each output channel
+- **Entity Naming**: Multi-channel switches automatically get descriptive names (e.g., "Device Name Output 1", "Device Name Output 2")
+- **Examples**: Supports devices like Shelly Plus 2 PM, Fibaro Double Switch, and other multi-channel relay devices
+
+#### Enhanced Capability Support
+- **Meter Capabilities**: Added support for `meter_power`, `meter_water`, and `meter_gas` capabilities with proper state classes (`TOTAL_INCREASING`)
+- **Sub-Capability Support**: Full support for sub-capabilities (capabilities with dots, e.g., `measure_temperature.inside`, `alarm_motion.outside`)
+- **Additional Binary Sensors**: Added support for `alarm_gas`, `alarm_fire`, `alarm_panic`, `alarm_burglar`, `alarm_generic`, `alarm_maintenance`, `button`, and `vibration` capabilities
+- **Alternative Capability Names**: Added support for alternative capability names (`measure_wind_speed`, `measure_wind_direction`, `measure_light`, `measure_illuminance`)
+
+#### Device-Specific Detection
+- **Philips Hue Devices**: Enhanced detection to ensure Philips Hue devices (including White & Ambiance bulbs) are correctly identified as lights with full dimming and color temperature support
+- **Sunricher Devices**: Added device-specific detection for Sunricher dimming devices to ensure they're classified as lights
+- **Fibaro Devices**: Enhanced detection for Fibaro switches, outlets, and roller shutters to ensure correct classification
+- **Shelly Devices**: Added device-specific detection for Shelly devices to ensure switches are correctly identified
+
+#### Light Enhancements
+- **Normalized Temperature Handling**: Improved handling of normalized `light_temperature` values (0-1) with automatic conversion to Kelvin range (2000-6500K)
+- **Better Capability Detection**: Enhanced light entity creation to properly detect and expose dimming and color temperature capabilities
+
+#### Maintenance Button Filtering
+- **Maintenance Action Detection**: Added filtering for maintenance buttons using Homey's `maintenanceAction` property
+- **Automatic Cleanup**: Added automatic cleanup of existing maintenance button entities (migrate, identify, reset buttons) on integration reload
+- **Comprehensive Filtering**: Maintenance buttons are now filtered in button, sensor, and binary sensor platforms
+
+#### Documentation
+- **Troubleshooting Guide**: Added comprehensive troubleshooting guide with step-by-step instructions for gathering device information using Homey Developer Tools
+- **Device Information Guide**: Added detailed guide explaining how to use Homey Web API Playground to get device capabilities and class information for issue reporting
+
+### Fixed
+
+#### Device Classification Fixes
+- **Philips Hue E27 White & Ambiance**: Fixed issue where bulbs were recognized as lights but only supported on/off - now properly supports dimming and color temperature
+- **Sunricher Dim Lighting**: Fixed issue where dimming devices were recognized as lights but only supported on/off - now properly supports dimming
+- **Fibaro Walli Roller Shutter (FGWREU-111)**: Fixed issue where roller shutters were recognized as sensors - now correctly detected as covers
+- **Fibaro Walli Switch (FGWDSEU-221)**: Fixed issue where switches were recognized as sensors - now correctly detected as switches
+- **Fibaro Single/Double Switch (FGS-213/223)**: Fixed issue where switches were recognized as sensors - now correctly detected as switches
+- **Fibaro Wall Plug (FGWPE-102)**: Fixed issue where wall plugs were recognized as sensors - now correctly detected as switches
+- **Fibaro Walli Outlet (FGWOE-011)**: Fixed issue where outlets were recognized as sensors - now correctly detected as switches
+- **Shelly Plus Plug S**: Fixed issue where Shelly devices were recognized as sensors - now correctly detected as switches
+- **Shelly 1 Mini Gen 3**: Fixed issue where Shelly devices were recognized as sensors - now correctly detected as switches
+- **Shelly Plus 2 PM**: Fixed issue where Shelly devices were recognized as sensors - now correctly detected as switches
+- **Window Coverings with `windowcoverings_set`**: Fixed issue where devices using `windowcoverings_set` instead of `windowcoverings_state` were not detected as covers
+- **Multi-Channel Switches**: Fixed issue where devices with `onoff.output1`, `onoff.output2` sub-capabilities were not creating switch entities - now creates separate switch entities for each channel
+
+#### Priority Order Improvements
+- **Control Capabilities First**: Fixed device classification priority to prioritize control capabilities (cover, light, switch) over sensor capabilities (measure_*, meter_*)
+- **Switch vs Sensor**: Devices with `onoff` capability are now correctly classified as switches even when they also have metering capabilities
+
+#### Maintenance Button Issues
+- **Maintenance Buttons Appearing**: Fixed issue where maintenance buttons (migrate, identify, reset) were appearing as entities in Home Assistant
+- **Entity Cleanup**: Added automatic removal of existing maintenance button entities on integration reload
+
+### Changed
+
+#### Device Type Detection Logic
+- **Priority Order**: Updated device type detection priority to: Cover > Light > Climate > Fan > Lock > Media Player > Switch > Sensor
+- **Device Class Integration**: Homey's `device_class` field is now checked first for device classification, with capability-based detection as fallback
+- **Multi-Entity Support**: Devices with both control and sensor capabilities now correctly get multiple entities (e.g., switch + power sensor)
+
+#### Light Platform
+- **Temperature Conversion**: Improved `light_temperature` handling to detect normalized values (0-1) and convert to Kelvin range automatically
+- **Capability Logging**: Enhanced logging for light entity creation to help diagnose capability detection issues
+
+#### Switch Platform
+- **Classification Logic**: Updated switch platform to use centralized `get_device_type` function for consistent device classification
+- **Multi-Channel Support**: Added support for multi-channel switches with sub-capabilities (e.g., `onoff.output1`, `onoff.output2`) - creates separate switch entities for each channel
+- **Better Logging**: Improved logging to show why devices are or aren't created as switch entities
 
 ---
 

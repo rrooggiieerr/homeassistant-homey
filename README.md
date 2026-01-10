@@ -4,15 +4,19 @@
 [![GitHub issues](https://img.shields.io/github/issues/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/issues)
 [![GitHub stars](https://img.shields.io/github/stars/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/stargazers)
 
-**Version**: 1.1.1 | **Last Updated**: 2026-01-11 | [Changelog](CHANGELOG.md)
+**Version**: 1.1.3 | **Last Updated**: 2026-01-11 | [Changelog](CHANGELOG.md)
 
 A Home Assistant integration that automatically discovers and connects all your Homey devices, making them available natively in Home Assistant.
+
+---
 
 ## Overview
 
 This integration bridges your [Homey](https://homey.app) hub with Home Assistant, allowing you to control all your Homey devices directly from Home Assistant. It supports a wide range of device types including lights, switches, sensors, climate devices, and more. Additionally, it allows you to trigger Homey Flows (automations) from Home Assistant.
 
 **Note**: This is a work in progress made by just one guy with too much time on his hands who couldn't sit on his ass waiting for someone else to create this plugin. It works, but expect bugs, occasional updates, and the occasional "oops, that broke something" moment. 🤷‍♂️
+
+---
 
 ## Features
 
@@ -32,6 +36,8 @@ This integration bridges your [Homey](https://homey.app) hub with Home Assistant
 - ⚙️ **Easy Setup**: Simple configuration flow through Home Assistant's UI
 - 🎯 **Smart Device Grouping**: All entities from the same device are automatically grouped under one device entry
 - 🔐 **Permission Management**: Comprehensive permission checking with graceful degradation - integration works even with limited permissions
+
+---
 
 ## Table of Contents
 
@@ -58,6 +64,8 @@ This integration bridges your [Homey](https://homey.app) hub with Home Assistant
 - [API Documentation](#api-documentation)
 - [License](#license)
 - [Support](#support)
+
+---
 
 ## Prerequisites
 
@@ -347,6 +355,8 @@ After restarting, reload the integration to ensure all changes are applied:
 - Reload the integration
 - Check that flows are enabled in Homey
 
+---
+
 ## Configuration
 
 ### Setup Steps
@@ -362,6 +372,8 @@ After restarting, reload the integration to ensure all changes are applied:
 5. Click **Submit**
 
 The integration will automatically discover all your Homey devices and create entities in Home Assistant.
+
+---
 
 ## Usage
 
@@ -464,6 +476,8 @@ Physical device buttons (like Hue dimmer switches, IKEA remotes, etc.) are autom
 
 **Note**: Internal Homey migration capabilities are automatically filtered out and won't appear as buttons.
 
+---
+
 ## Device Organization
 
 Devices are automatically organized by:
@@ -473,6 +487,8 @@ Devices are automatically organized by:
 - **Grouping**: All entities from the same device are grouped under one device entry
 
 **Note**: A single physical device may have multiple entities (e.g., a light with power measurement will show as 1 device with 2 entities: a light entity and a power sensor entity). This is normal and expected behavior.
+
+---
 
 ## Automatic Synchronization
 
@@ -500,6 +516,8 @@ The integration automatically synchronizes changes made in Homey with Home Assis
 
 **Note**: Entity names (`_attr_name`) are set during initialization and won't update automatically. The device name in the UI will update, but individual entity names may show the old name until you reload the integration. This is a Home Assistant limitation and is acceptable for most use cases.
 
+---
+
 ## Supported Devices
 
 The integration supports devices with the following capabilities:
@@ -523,14 +541,19 @@ The integration supports devices with the following capabilities:
 
 ### Switches
 - `onoff` - On/off control
+- `onoff.output1`, `onoff.output2`, etc. - Multi-channel switches (sub-capabilities)
+
+**Multi-Channel Support**: Devices with multiple outputs (e.g., Shelly Plus 2 PM, Fibaro Double Switch) create separate switch entities for each output channel. Each channel gets its own entity with a descriptive name (e.g., "Device Name Output 1", "Device Name Output 2").
 
 **Note**: Devices with dimming or color capabilities are created as lights, not switches.
 
 ### Sensors
 - `measure_temperature` - Temperature sensor (°C)
+- `measure_temperature.inside`, `measure_temperature.outside`, etc. - Sub-capability temperature sensors
 - `measure_humidity` - Humidity sensor (%)
 - `measure_pressure` - Pressure sensor (hPa)
 - `measure_power` - Power consumption sensor (W)
+- `measure_power.output1`, `measure_power.output2`, etc. - Multi-channel power sensors
 - `measure_voltage` - Voltage sensor (V)
 - `measure_current` - Current sensor (A)
 - `measure_luminance` - Light level sensor (lux)
@@ -550,6 +573,12 @@ The integration supports devices with the following capabilities:
 - `measure_soil_moisture` - Soil moisture sensor (%)
 - `measure_soil_temperature` - Soil temperature sensor (°C)
 - `measure_energy` - Energy consumption sensor (kWh) with proper state class for energy tracking
+- `meter_power` - Energy meter (kWh) with `TOTAL_INCREASING` state class
+- `meter_power.output1`, `meter_power.output2`, etc. - Multi-channel energy meters
+- `meter_water` - Water meter (m³) with `TOTAL_INCREASING` state class
+- `meter_gas` - Gas meter (m³) with `TOTAL_INCREASING` state class
+
+**Sub-Capability Support**: The integration fully supports sub-capabilities (capabilities with dots, e.g., `measure_temperature.inside`, `measure_power.output1`). Each sub-capability creates its own sensor entity with a descriptive name.
 
 ### Binary Sensors
 - `alarm_motion` - Motion detector
@@ -571,7 +600,11 @@ The integration supports devices with the following capabilities:
 
 ### Covers
 - `windowcoverings_state` - Window covering position (0-100%)
+- `windowcoverings_set` - Alternative window covering position capability (some devices use this instead of `windowcoverings_state`)
 - `windowcoverings_tilt_up` / `windowcoverings_tilt_down` - Tilt control
+- `garagedoor_closed` - Garage door state (open/closed)
+
+**Note**: The integration supports both `windowcoverings_state` and `windowcoverings_set` capabilities. Devices using either capability will be correctly detected as covers.
 
 ### Climate
 - `target_temperature` - Target temperature control (°C)
@@ -624,6 +657,8 @@ The integration supports devices with the following capabilities:
 - Ready for future capabilities that require numeric input or option selection
 - Currently placeholder platforms - will be populated as new capabilities are identified
 
+---
+
 ## Known Issues & Limitations
 
 ### Room/Zone Detection
@@ -645,6 +680,8 @@ The integration supports devices with the following capabilities:
 - **Issue**: Real-time updates via Socket.IO are currently disabled due to authentication complexity.
 - **Impact**: Changes made outside Home Assistant (via Homey app or physical switches) may take up to 10 seconds to appear due to polling interval. However, changes made within Home Assistant update immediately (1-2 seconds).
 - **Solution**: This is a known limitation. The current approach provides immediate feedback for your actions while using efficient polling for external changes. Polling every 10 seconds with immediate refresh after commands provides a good balance of responsiveness and reliability.
+
+---
 
 ## Troubleshooting
 
@@ -693,6 +730,10 @@ If devices aren't appearing in Home Assistant:
    - Check the logs for any errors related to device discovery
    - Look for messages about unsupported capabilities
 
+4. **Device Classification Issues**:
+   - If a device appears as the wrong type (e.g., switch showing as sensor, or light without dimming), see [Gathering Device Information](#gathering-device-information-for-troubleshooting) below
+   - This helps us understand what capabilities Homey exposes for your device
+
 ### Duplicate Devices
 
 If you see duplicate devices:
@@ -726,6 +767,8 @@ If device name or room changes made in Homey aren't appearing in Home Assistant:
 2. **Check Logs**: Look for messages about device registry updates in the logs
 3. **Manual Refresh**: Reload the integration: **Settings** → **Devices & Services** → **Homey** → **⋮** → **Reload**
 4. **Verify Changes**: Make sure the changes were actually saved in Homey
+
+---
 
 ## Development
 
@@ -783,6 +826,123 @@ If you encounter any issues, please:
    - Homey firmware version
    - Relevant log entries
 
+#### Gathering Device Information for Troubleshooting
+
+**When to use this guide:** If you're experiencing issues with device classification (wrong entity type), missing capabilities (e.g., light without dimming), or devices not appearing correctly, gathering device information helps diagnose the issue.
+
+If you're experiencing issues with a specific device (e.g., device not appearing, wrong entity type, missing capabilities), we need to see the device's capabilities and class information from Homey to diagnose the issue.
+
+**Step-by-Step Guide:**
+
+1. **Open Homey Developer Tools**:
+   - Go to https://tools.developer.homey.app
+   - Select your Homey hub
+   - Click **"Devices"** in the left menu
+
+2. **Find Your Device**:
+   - Browse or search for the device you're having trouble with
+   - Click on the device to open its details
+   - **Copy the device ID** (it's a UUID like `0cb8501e-e786-4d24-9bec-00b57a15d7f7`)
+
+3. **Get Device Information**:
+   - Go to **"Web API Playground"** in the left menu
+   - Paste the following code, replacing `YOUR_DEVICE_ID` with the device ID you copied:
+   
+   ```javascript
+   Homey.devices.getDevice({ id: "YOUR_DEVICE_ID" })
+     .then(d => ({
+       id: d.id,
+       name: d.name,
+       class: d.class,
+       driverId: d.driverId,
+       capabilities: d.capabilities,
+       capabilitiesObj: d.capabilitiesObj,
+     }));
+   ```
+
+4. **Copy the Output**:
+   - Click **"Run"** or press Enter
+   - The output will appear in the console below
+   - **Copy the entire JSON output** (it contains all the device information we need)
+
+5. **Include in Your Issue**:
+   - Paste the device information JSON in your GitHub issue
+   - This helps us understand:
+     - What device class Homey assigns to the device
+     - What capabilities are exposed
+     - Whether capabilities are properly configured
+     - If there are any missing or incorrectly exposed capabilities
+
+**Example Output:**
+```json
+{
+  "class": "thermostat",
+  "capabilities": [
+    "measure_temperature",
+    "measure_temperature.external",
+    "measure_temperature.floor",
+    "thermofloor_onoff",
+    "measure_power",
+    "measure_voltage",
+    "meter_power",
+    "thermofloor_mode",
+    "target_temperature",
+    "button.reset_meter"
+  ],
+  "capabilitiesObj": {
+    "measure_temperature": {
+      "id": "measure_temperature",
+      "type": "number",
+      "title": "temperature",
+      "getable": true,
+      "setable": false,
+      "units": "C",
+      "decimals": 1,
+      "value": 16.5,
+      "lastUpdated": "2026-01-10T10:55:00.000Z"
+    },
+    "target_temperature": {
+      "id": "target_temperature",
+      "type": "number",
+      "title": "target temperature",
+      "getable": true,
+      "setable": true,
+      "min": 5,
+      "max": 35,
+      "units": "C",
+      "decimals": 1,
+      "value": 20.0
+    },
+    "button.reset_meter": {
+      "id": "button.reset_meter",
+      "type": "boolean",
+      "title": "Reset power meter",
+      "getable": false,
+      "setable": true,
+      "maintenanceAction": true
+    }
+  }
+}
+```
+
+**Note:** The actual output will include all capabilities your device exposes. The `capabilitiesObj` contains detailed information for each capability including current values, min/max ranges, units, and whether capabilities are getable/setable.
+
+**What This Information Tells Us:**
+- **`class`**: The device type Homey assigns (e.g., "light", "socket", "sensor", "windowcoverings")
+- **`capabilities`**: List of capability IDs the device exposes
+- **`capabilitiesObj`**: Detailed capability information including min/max values, getable/setable flags, and current values
+- **`driverId`**: The driver/app that manages this device (helps with device-specific detection)
+
+**Common Issues This Helps Diagnose:**
+- Device classified as wrong type (e.g., switch showing as sensor)
+- Missing capabilities (e.g., light without dimming support)
+- Capabilities not properly exposed by Homey app
+- Device-specific detection issues
+
+**Privacy Note:** The device information contains your device names and current states. If you're concerned about privacy, you can redact the `name` field and `value` fields in `capabilitiesObj` before sharing.
+
+---
+
 ## API Documentation
 
 For more information about the Homey API:
@@ -791,9 +951,13 @@ For more information about the Homey API:
 - [Homey API Keys Guide](https://support.homey.app/hc/en-us/articles/8178797067292-Getting-started-with-API-Keys)
 - [Homey Local API](https://apps.developer.homey.app/the-basics/local-api)
 
+---
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
 
 ## Credits
 
@@ -808,6 +972,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Inspired by the need to bridge Homey and Home Assistant ecosystems
 - Special thanks to [@PeterKawa](https://github.com/PeterKawa) for initial testing, bug reports, and feedback that helped identify and fix many issues
 - Created by one guy with too much time on his hands who couldn't sit on his ass waiting for someone else to build this 😄
+
+---
 
 ## Support
 

@@ -49,12 +49,61 @@ async def async_setup_entry(
 
     for device_id, device in devices.items():
         capabilities = device.get("capabilitiesObj", {})
+        driver_uri = device.get("driverUri", "").lower()
+        device_name = device.get("name", "Unknown")
+        
         # Check if device has light-related capabilities
-        if "onoff" in capabilities and (
-            "dim" in capabilities
-            or "light_hue" in capabilities
-            or "light_temperature" in capabilities
-        ):
+        # A device is a light if it has onoff AND at least one of: dim, light_hue, light_temperature
+        # Note: light_hue requires light_saturation for full color support, but we check for light_hue alone
+        # to catch devices that might have color capabilities even if saturation isn't exposed
+        has_onoff = "onoff" in capabilities
+        has_dim = "dim" in capabilities
+        has_hue = "light_hue" in capabilities
+        has_saturation = "light_saturation" in capabilities
+        has_temp = "light_temperature" in capabilities
+        
+        # Device-specific detection: Some devices are known to be lights even if capabilities aren't fully exposed
+        is_known_light_device = False
+        if driver_uri:
+            # Philips Hue devices - should be lights if they have onoff
+            # White & Ambiance bulbs have: onoff + dim + light_temperature
+            # White & Color Ambiance bulbs have: onoff + dim + light_hue + light_saturation
+            if "philips" in driver_uri and "hue" in driver_uri:
+                if has_onoff:
+                    is_known_light_device = True
+                    _LOGGER.info(
+                        "Detected Philips Hue device %s (%s) - treating as light (driver: %s, dim=%s, temp=%s, hue=%s)",
+                        device_id, device_name, device.get("driverUri", "unknown"), has_dim, has_temp, has_hue
+                    )
+            
+            # Sunricher dimming devices - should be lights if they have onoff
+            # Even if dim isn't exposed, if it's a Sunricher dimmer, treat as light
+            if "sunricher" in driver_uri:
+                if has_onoff:
+                    is_known_light_device = True
+                    _LOGGER.info(
+                        "Detected Sunricher dimming device %s (%s) - treating as light (driver: %s, dim=%s)",
+                        device_id, device_name, device.get("driverUri", "unknown"), has_dim
+                    )
+        
+        # Create light entity if:
+        # 1. Has onoff AND (dim OR hue OR temp) - standard light detection
+        # 2. OR is a known light device type (device-specific detection)
+        # Note: Even if capabilities aren't fully exposed, we create the light entity
+        # and let the entity class determine supported features based on available capabilities
+        if (has_onoff and (has_dim or has_hue or has_temp)) or is_known_light_device:
+            # Log capabilities for debugging
+            _LOGGER.info(
+                "Creating light entity for device %s (%s) - onoff=%s, dim=%s, hue=%s, saturation=%s, temp=%s, driver=%s",
+                device_id,
+                device_name,
+                has_onoff,
+                has_dim,
+                has_hue,
+                has_saturation,
+                has_temp,
+                device.get("driverUri", "unknown")
+            )
             entities.append(HomeyLight(coordinator, device_id, device, api, zones))
 
     _LOGGER.debug("Created %d Homey light entities", len(entities))
@@ -85,22 +134,60 @@ class HomeyLight(CoordinatorEntity, LightEntity):
         # Note: HS and COLOR_TEMP cannot be combined - if both are available, prefer HS
         color_modes = set()
         has_dim = "dim" in capabilities
-        has_hs = "light_hue" in capabilities and "light_saturation" in capabilities
+        # Check for hue and saturation - both are needed for full HS color support
+        # Some devices might have hue without saturation, but we'll treat that as HS mode anyway
+        has_hue = "light_hue" in capabilities
+        has_saturation = "light_saturation" in capabilities
+        has_hs = has_hue and has_saturation
         has_temp = "light_temperature" in capabilities
         
+        # Log all capabilities found for debugging
+        _LOGGER.debug(
+            "Device %s (%s) light capabilities: dim=%s, hue=%s, saturation=%s, temp=%s",
+            device_id,
+            device.get("name", "Unknown"),
+            has_dim,
+            has_hue,
+            has_saturation,
+            has_temp
+        )
+        
+        # Determine color modes based on available capabilities
+        # Priority: HS > COLOR_TEMP > BRIGHTNESS > ONOFF
+        # Note: HS and COLOR_TEMP cannot be combined - if both are available, prefer HS
+        
         if has_hs:
-            # If HS color is available, use it (can't combine with COLOR_TEMP)
+            # Full HS color support (hue + saturation)
             # HS mode automatically includes brightness, so don't add BRIGHTNESS separately
             color_modes.add(ColorMode.HS)
+            _LOGGER.debug("Device %s (%s) supports HS color mode", device_id, device.get("name", "Unknown"))
+        elif has_hue and not has_saturation:
+            # Device has hue but not saturation - still use HS mode but warn
+            # Some devices might expose hue without saturation, or saturation might be missing
+            _LOGGER.warning(
+                "Device %s (%s) has light_hue but not light_saturation - using HS mode but color may not work fully",
+                device_id,
+                device.get("name", "Unknown")
+            )
+            color_modes.add(ColorMode.HS)
         elif has_temp:
-            # If only color temp is available, use it
+            # Color temperature support (White & Ambiance bulbs, CCT controllers)
             # COLOR_TEMP mode automatically includes brightness, so don't add BRIGHTNESS separately
             color_modes.add(ColorMode.COLOR_TEMP)
+            _LOGGER.debug("Device %s (%s) supports COLOR_TEMP mode", device_id, device.get("name", "Unknown"))
         elif has_dim:
-            # Only dimming available
+            # Only dimming available (dimmable lights without color)
             color_modes.add(ColorMode.BRIGHTNESS)
+            _LOGGER.debug("Device %s (%s) supports BRIGHTNESS mode only", device_id, device.get("name", "Unknown"))
         else:
-            # Just on/off
+            # Just on/off - this can happen for known light devices where capabilities aren't fully exposed
+            # We still create a light entity but with limited functionality
+            _LOGGER.warning(
+                "Device %s (%s) created as light but has no dim/hue/temp capabilities - using ONOFF mode only. "
+                "This may indicate missing capability exposure in Homey.",
+                device_id,
+                device.get("name", "Unknown")
+            )
             color_modes.add(ColorMode.ONOFF)
 
         self._attr_supported_color_modes = color_modes
@@ -121,9 +208,29 @@ class HomeyLight(CoordinatorEntity, LightEntity):
         # Set color temperature range in Kelvin (required for COLOR_TEMP mode)
         if ColorMode.COLOR_TEMP in color_modes:
             temp_cap = capabilities.get("light_temperature", {})
-            # Default range: 2000K (warm) to 6500K (cool)
-            self._attr_min_color_temp_kelvin = temp_cap.get("min", 2000)
-            self._attr_max_color_temp_kelvin = temp_cap.get("max", 6500)
+            temp_min = temp_cap.get("min", 0)
+            temp_max = temp_cap.get("max", 1)
+            
+            # Check if temperature is normalized (0-1) or in Kelvin
+            # If min=0 and max=1, it's normalized - convert to Kelvin range
+            # Typical range: 0 = 2000K (warm), 1 = 6500K (cool)
+            if temp_min == 0 and temp_max == 1:
+                # Normalized range - convert to Kelvin
+                self._attr_min_color_temp_kelvin = 2000  # Warm white
+                self._attr_max_color_temp_kelvin = 6500  # Cool white
+                _LOGGER.debug(
+                    "Device %s (%s) has normalized light_temperature (0-1), converting to Kelvin range 2000-6500K",
+                    device_id, device.get("name", "Unknown")
+                )
+            else:
+                # Already in Kelvin (or different range)
+                self._attr_min_color_temp_kelvin = int(temp_min)
+                self._attr_max_color_temp_kelvin = int(temp_max)
+                _LOGGER.debug(
+                    "Device %s (%s) has light_temperature in Kelvin range %d-%dK",
+                    device_id, device.get("name", "Unknown"), 
+                    self._attr_min_color_temp_kelvin, self._attr_max_color_temp_kelvin
+                )
 
         self._attr_device_info = get_device_info(device_id, device, zones)
 
@@ -212,9 +319,21 @@ class HomeyLight(CoordinatorEntity, LightEntity):
         """Return the color temperature in Kelvin."""
         device_data = self.coordinator.data.get(self._device_id, self._device)
         capabilities = device_data.get("capabilitiesObj", {})
-        temp = capabilities.get("light_temperature", {}).get("value")
+        temp_cap = capabilities.get("light_temperature", {})
+        temp = temp_cap.get("value")
         if temp is not None:
-            return int(temp)
+            temp_min = temp_cap.get("min", 0)
+            temp_max = temp_cap.get("max", 1)
+            
+            # Check if temperature is normalized (0-1) or in Kelvin
+            if temp_min == 0 and temp_max == 1:
+                # Normalized value - convert to Kelvin
+                # 0 = 2000K (warm), 1 = 6500K (cool)
+                kelvin = int(2000 + (temp * (6500 - 2000)))
+                return kelvin
+            else:
+                # Already in Kelvin
+                return int(temp)
         return None
 
     async def async_turn_on(self, **kwargs: Any) -> None:
@@ -264,7 +383,29 @@ class HomeyLight(CoordinatorEntity, LightEntity):
         if ATTR_COLOR_TEMP_KELVIN in kwargs:
             kelvin = kwargs[ATTR_COLOR_TEMP_KELVIN]
             try:
-                capabilities_to_set["light_temperature"] = int(kelvin) if not isinstance(kelvin, (int, float)) else kelvin
+                kelvin = int(kelvin) if not isinstance(kelvin, (int, float)) else kelvin
+                
+                # Check if device uses normalized temperature (0-1) or Kelvin
+                device_data = self.coordinator.data.get(self._device_id, self._device)
+                capabilities = device_data.get("capabilitiesObj", {})
+                temp_cap = capabilities.get("light_temperature", {})
+                temp_min = temp_cap.get("min", 0)
+                temp_max = temp_cap.get("max", 1)
+                
+                if temp_min == 0 and temp_max == 1:
+                    # Device uses normalized range - convert Kelvin to 0-1
+                    # Clamp to valid range
+                    kelvin = max(2000, min(6500, kelvin))
+                    # Convert: 0 = 2000K, 1 = 6500K
+                    normalized = (kelvin - 2000) / (6500 - 2000)
+                    capabilities_to_set["light_temperature"] = normalized
+                    _LOGGER.debug(
+                        "Converting color temp %dK to normalized %.4f for device %s",
+                        kelvin, normalized, self._device_id
+                    )
+                else:
+                    # Device uses Kelvin directly
+                    capabilities_to_set["light_temperature"] = kelvin
             except (ValueError, TypeError):
                 _LOGGER.warning("Invalid color temperature value: %s", kelvin)
                 # Skip temperature setting if invalid
@@ -339,7 +480,19 @@ class HomeyLight(CoordinatorEntity, LightEntity):
         for capability, value in capabilities_to_set.items():
             success = await self._api.set_capability_value(self._device_id, capability, value)
             if not success:
-                _LOGGER.error("Failed to set capability %s for light %s", capability, self._device_id)
+                # Check if capability exists in device
+                device_data = self.coordinator.data.get(self._device_id, self._device)
+                capabilities = device_data.get("capabilitiesObj", {})
+                if capability not in capabilities:
+                    _LOGGER.error(
+                        "Failed to set capability %s for light %s (%s) - capability not found in device. Available capabilities: %s",
+                        capability, self._device_id, self._attr_name, list(capabilities.keys())
+                    )
+                else:
+                    _LOGGER.error(
+                        "Failed to set capability %s=%s for light %s (%s) - API call failed. Check device logs and ensure capability is writable.",
+                        capability, value, self._device_id, self._attr_name
+                    )
 
         # Immediately refresh this device's state for instant UI feedback
         await self.coordinator.async_refresh_device(self._device_id)

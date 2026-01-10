@@ -6,29 +6,145 @@ from typing import Any
 from .const import DOMAIN
 
 
-def get_device_type(capabilities: dict[str, Any]) -> str:
-    """Determine device type based on capabilities."""
+def get_device_type(capabilities: dict[str, Any], driver_uri: str | None = None, device_class: str | None = None) -> str:
+    """Determine device type based on capabilities, driver URI, and optionally Homey device class.
+    
+    Priority order (control capabilities first, then sensors):
+    1. Cover (windowcoverings_state)
+    2. Light (dim, light_hue, light_temperature)
+    3. Climate (target_temperature)
+    4. Fan (fan_speed)
+    5. Lock (locked)
+    6. Media Player (volume_set, speaker_playing, etc.)
+    7. Switch (onoff) - but only if not already classified above
+    8. Sensor (measure_*, alarm_*) - only if no control capabilities
+    
+    Args:
+        capabilities: Dictionary of device capabilities
+        driver_uri: Optional driver URI (e.g., "philips.hue", "fibaro.fgwreu111") for device-specific detection
+        device_class: Optional Homey device class (e.g., "light", "socket", "sensor") - very reliable indicator
+    """
     caps = set(capabilities.keys())
     
-    # Check for specific device types
-    if any(cap in caps for cap in ["light_hue", "light_saturation", "light_temperature", "dim"]):
-        return "light"
-    if "windowcoverings_state" in caps:
+    # Use Homey's device class if available - it's the most reliable indicator
+    # Reference: https://apps.developer.homey.app/the-basics/devices/capabilities
+    # Complete mapping of all Homey device classes to HA entity types
+    if device_class:
+        class_mapping = {
+            # Core device classes
+            "light": "light",
+            "socket": "switch",  # Homey "socket" = switch/outlet in HA
+            "sensor": "sensor",
+            "thermostat": "climate",
+            "speaker": "media_player",
+            "tv": "media_player",
+            "remote": "sensor",  # Remotes are typically sensors/binary sensors
+            "other": "device",
+            # Window coverings
+            "windowcoverings": "cover",  # Official Homey class for covers
+            "cover": "cover",  # Alternative naming
+            # Additional classes that may exist
+            "lock": "lock",
+            "fan": "fan",
+            "camera": "device",  # Cameras don't have a direct HA equivalent
+            "doorbell": "binary_sensor",  # Doorbells are typically binary sensors
+            "garagedoor": "cover",  # Garage doors are covers
+            "curtain": "cover",  # Curtains are covers
+            "blind": "cover",  # Blinds are covers
+            "shutter": "cover",  # Shutters are covers
+            "awning": "cover",  # Awnings are covers
+        }
+        # Check if it's a cover first (windowcoverings_state, windowcoverings_set, or garagedoor_closed takes precedence over class)
+        if any(cap in caps for cap in ["windowcoverings_state", "windowcoverings_set", "garagedoor_closed"]):
+            return "cover"
+        # Map known classes
+        if device_class in class_mapping:
+            mapped_type = class_mapping[device_class]
+            # Don't override if we have more specific capabilities
+            if mapped_type == "switch" and any(cap in caps for cap in ["dim", "light_hue", "light_temperature"]):
+                # Device class says "socket" but has light capabilities - treat as light
+                return "light"
+            return mapped_type
+        # Unknown device class - log for debugging but continue with capability-based detection
+        _LOGGER.debug("Unknown device class '%s' - using capability-based detection", device_class)
+    
+    # PRIORITY 1: Cover devices (windowcoverings_state, windowcoverings_set, garagedoor_closed)
+    # This must come FIRST because covers can also have metering (measure_power)
+    # Reference: https://apps.developer.homey.app/the-basics/devices/capabilities
+    # Note: Some devices use windowcoverings_set instead of windowcoverings_state
+    if any(cap in caps for cap in ["windowcoverings_state", "windowcoverings_set", "garagedoor_closed"]):
         return "cover"
+    
+    # PRIORITY 2: Light devices
+    # Check for light capabilities: dim, light_hue, light_saturation, light_temperature
+    has_light_capabilities = any(
+        cap in caps for cap in ["light_hue", "light_saturation", "light_temperature", "dim"]
+    )
+    if has_light_capabilities:
+        return "light"
+    
+    # PRIORITY 3: Climate devices
     if "target_temperature" in caps:
         return "climate"
+    
+    # PRIORITY 4: Fan devices
     if "fan_speed" in caps:
         return "fan"
+    
+    # PRIORITY 5: Lock devices
     if "locked" in caps:
         return "lock"
+    
+    # PRIORITY 6: Media Player devices
     if any(cap in caps for cap in ["volume_set", "speaker_playing", "speaker_next"]):
         return "media_player"
+    
+    # PRIORITY 7: Switch devices (onoff capability)
+    # IMPORTANT: This comes BEFORE sensors because devices with onoff + measure_power
+    # should be classified as switches (with sensor entities), not sensors
+    if "onoff" in caps:
+        return "switch"
+    
+    # PRIORITY 8: Sensor devices (only if no control capabilities found)
+    # Only classify as sensor if there are no control capabilities
     if any(cap.startswith("alarm_") for cap in caps):
         return "sensor"
     if any(cap.startswith("measure_") for cap in caps):
         return "sensor"
-    if "onoff" in caps:
-        return "switch"
+    
+    # Device-specific detection based on driver URI
+    # Some devices might not expose all capabilities correctly, so we can infer from driver
+    if driver_uri:
+        driver_lower = driver_uri.lower()
+        
+        # Philips Hue devices - should be lights if they have onoff
+        # Even White & Ambiance bulbs should be lights (they have dim + light_temperature)
+        if "philips" in driver_lower and "hue" in driver_lower:
+            if "onoff" in caps:
+                # Check if it has dim or temperature capabilities
+                if "dim" in caps or "light_temperature" in caps:
+                    return "light"
+                # Even if just onoff, treat as light (might be missing capability exposure)
+                return "light"
+        
+        # Fibaro switches/outlets - should be switches if they have onoff
+        # Note: Roller shutters already handled above (windowcoverings_state)
+        if "fibaro" in driver_lower:
+            if "onoff" in caps:
+                return "switch"
+        
+        # Shelly devices - should be switches if they have onoff
+        if "shelly" in driver_lower:
+            if "onoff" in caps:
+                return "switch"
+        
+        # Sunricher dimming devices - should be lights if they have onoff and dim
+        if "sunricher" in driver_lower:
+            if "onoff" in caps:
+                if "dim" in caps:
+                    return "light"
+                # Even if dim not exposed, if it's a Sunricher dimmer, treat as light
+                return "light"
     
     return "device"
 
@@ -44,7 +160,9 @@ def get_device_info(
     to ensure they're grouped under one device in Home Assistant.
     """
     capabilities = device.get("capabilitiesObj", {})
-    device_type = get_device_type(capabilities)
+    driver_uri = device.get("driverUri")
+    device_class = device.get("class")
+    device_type = get_device_type(capabilities, driver_uri, device_class)
     
     # Get room/zone information
     zone_id = device.get("zone")
@@ -85,7 +203,9 @@ def get_entity_name_with_type(device: dict[str, Any], entity_type: str) -> str:
     """Get entity name with device type prefix for better searchability."""
     device_name = device.get("name", "Unknown")
     capabilities = device.get("capabilitiesObj", {})
-    device_type = get_device_type(capabilities)
+    driver_uri = device.get("driverUri")
+    device_class = device.get("class")
+    device_type = get_device_type(capabilities, driver_uri, device_class)
     
     # Add type prefix if it's helpful
     type_labels = {

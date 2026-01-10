@@ -37,7 +37,10 @@ async def async_setup_entry(
 
     for device_id, device in devices.items():
         capabilities = device.get("capabilitiesObj", {})
-        if "windowcoverings_state" in capabilities:
+        # Support windowcoverings_state, windowcoverings_set, and garagedoor_closed capabilities
+        # Reference: https://apps.developer.homey.app/the-basics/devices/capabilities
+        # Note: Some devices use windowcoverings_set instead of windowcoverings_state
+        if any(cap in capabilities for cap in ["windowcoverings_state", "windowcoverings_set", "garagedoor_closed"]):
             entities.append(HomeyCover(coordinator, device_id, device, api, zones))
 
     async_add_entities(entities)
@@ -63,7 +66,19 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
         self._attr_unique_id = f"homey_{device_id}_cover"
 
         capabilities = device.get("capabilitiesObj", {})
+        
+        # Check if device uses windowcoverings_state, windowcoverings_set, or garagedoor_closed
+        # Some devices use windowcoverings_set instead of windowcoverings_state
+        self._has_windowcoverings = "windowcoverings_state" in capabilities or "windowcoverings_set" in capabilities
+        self._has_garagedoor = "garagedoor_closed" in capabilities
+        # Determine which capability to use (prefer windowcoverings_state, fallback to windowcoverings_set)
+        self._windowcoverings_cap = "windowcoverings_state" if "windowcoverings_state" in capabilities else "windowcoverings_set"
+        
         supported_features = CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE | CoverEntityFeature.STOP
+        
+        # Garage doors don't support position setting, only open/close
+        if self._has_windowcoverings:
+            supported_features |= CoverEntityFeature.SET_COVER_POSITION
 
         if "windowcoverings_tilt_up" in capabilities and "windowcoverings_tilt_down" in capabilities:
             supported_features |= CoverEntityFeature.SET_TILT_POSITION | CoverEntityFeature.OPEN_TILT | CoverEntityFeature.CLOSE_TILT
@@ -83,21 +98,38 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
         if not capabilities:
             return None
         
-        state_cap = capabilities.get("windowcoverings_state")
-        if not state_cap:
-            return None
+        # Handle windowcoverings_state, windowcoverings_set, and garagedoor_closed
+        if self._has_windowcoverings:
+            state_cap = capabilities.get(self._windowcoverings_cap)
+            if not state_cap:
+                return None
+            
+            state = state_cap.get("value")
+            if state is None:
+                return None
+            
+            try:
+                # Convert state (0-1) to percentage (0-100)
+                # Note: windowcoverings_set uses 0-1 range, windowcoverings_state also uses 0-1
+                state_float = float(state)
+                return int(state_float * 100)
+            except (ValueError, TypeError):
+                _LOGGER.warning("Invalid %s value for device %s: %s", self._windowcoverings_cap, self._device_id, state)
+                return None
+        elif self._has_garagedoor:
+            # Garage door: closed = True means closed (position 0), False means open (position 100)
+            garagedoor_cap = capabilities.get("garagedoor_closed")
+            if not garagedoor_cap:
+                return None
+            
+            is_closed = garagedoor_cap.get("value")
+            if is_closed is None:
+                return None
+            
+            # Convert boolean to position: True (closed) = 0%, False (open) = 100%
+            return 0 if is_closed else 100
         
-        state = state_cap.get("value")
-        if state is None:
-            return None
-        
-        try:
-            # Convert state (0-1) to percentage (0-100)
-            state_float = float(state)
-            return int(state_float * 100)
-        except (ValueError, TypeError):
-            _LOGGER.warning("Invalid windowcoverings_state value for device %s: %s", self._device_id, state)
-            return None
+        return None
 
     @property
     def is_closed(self) -> bool | None:
@@ -120,19 +152,25 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
         if not device_data:
             return False
         
-        # Check if device has the windowcoverings_state capability
+        # Check if device has cover capabilities
         capabilities = device_data.get("capabilitiesObj", {})
-        return "windowcoverings_state" in capabilities
+        return any(cap in capabilities for cap in ["windowcoverings_state", "windowcoverings_set", "garagedoor_closed"])
 
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open the cover."""
-        await self._api.set_capability_value(self._device_id, "windowcoverings_state", 1.0)
+        if self._has_windowcoverings:
+            await self._api.set_capability_value(self._device_id, self._windowcoverings_cap, 1.0)
+        elif self._has_garagedoor:
+            await self._api.set_capability_value(self._device_id, "garagedoor_closed", False)
         # Immediately refresh this device's state for instant UI feedback
         await self.coordinator.async_refresh_device(self._device_id)
 
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close the cover."""
-        await self._api.set_capability_value(self._device_id, "windowcoverings_state", 0.0)
+        if self._has_windowcoverings:
+            await self._api.set_capability_value(self._device_id, self._windowcoverings_cap, 0.0)
+        elif self._has_garagedoor:
+            await self._api.set_capability_value(self._device_id, "garagedoor_closed", True)
         # Immediately refresh this device's state for instant UI feedback
         await self.coordinator.async_refresh_device(self._device_id)
 
@@ -150,9 +188,16 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
     async def async_set_cover_position(self, **kwargs: Any) -> None:
         """Move the cover to a specific position."""
         position = kwargs.get("position", 0)
-        await self._api.set_capability_value(
-            self._device_id, "windowcoverings_state", position / 100.0
-        )
+        if self._has_windowcoverings:
+            await self._api.set_capability_value(
+                self._device_id, self._windowcoverings_cap, position / 100.0
+            )
+        elif self._has_garagedoor:
+            # Garage doors are binary - convert position to boolean
+            # Position > 50% = open (False), <= 50% = closed (True)
+            await self._api.set_capability_value(
+                self._device_id, "garagedoor_closed", position <= 50
+            )
         # Immediately refresh this device's state for instant UI feedback
         await self.coordinator.async_refresh_device(self._device_id)
 

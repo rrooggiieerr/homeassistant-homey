@@ -145,6 +145,49 @@ CAPABILITY_TO_SENSOR = {
         "state_class": SensorStateClass.TOTAL_INCREASING,  # For energy consumption
         "unit": UnitOfEnergy.KILO_WATT_HOUR,
     },
+    # Meter capabilities (energy/utility meters)
+    # Reference: https://apps.developer.homey.app/the-basics/devices/capabilities
+    "meter_power": {
+        "device_class": SensorDeviceClass.ENERGY,
+        "state_class": SensorStateClass.TOTAL_INCREASING,  # Cumulative energy consumption
+        "unit": UnitOfEnergy.KILO_WATT_HOUR,
+    },
+    "meter_water": {
+        "device_class": None,  # Generic sensor - water meter
+        "state_class": SensorStateClass.TOTAL_INCREASING,  # Cumulative water consumption
+        "unit": "m³",  # Cubic meters
+    },
+    "meter_gas": {
+        "device_class": None,  # Generic sensor - gas meter
+        "state_class": SensorStateClass.TOTAL_INCREASING,  # Cumulative gas consumption
+        "unit": "m³",  # Cubic meters
+    },
+    # Additional measure_* capabilities that might exist
+    "measure_battery": {
+        "device_class": SensorDeviceClass.BATTERY,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": "%",
+    },
+    "measure_wind_speed": {  # Alternative name for wind_strength
+        "device_class": None,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": "m/s",
+    },
+    "measure_wind_direction": {  # Alternative name for wind_angle
+        "device_class": None,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": "°",
+    },
+    "measure_light": {  # Alternative name for luminance
+        "device_class": SensorDeviceClass.ILLUMINANCE,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": "lx",
+    },
+    "measure_illuminance": {  # Alternative name for luminance
+        "device_class": SensorDeviceClass.ILLUMINANCE,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": "lx",
+    },
 }
 
 
@@ -173,6 +216,23 @@ async def async_setup_entry(
                 entities.append(
                     HomeySensor(coordinator, device_id, device, capability_id, api, zones)
                 )
+        
+        # Also handle sub-capabilities (capabilities with dots, e.g., measure_temperature.inside)
+        # Reference: https://apps.developer.homey.app/the-basics/devices/capabilities#sub-capabilities-using-the-same-capability-more-than-once
+        # BUT exclude internal Homey maintenance buttons (migration, reset, identify, etc.)
+        for capability_id in capabilities:
+            # Check if this is a sub-capability of a known sensor capability
+            if "." in capability_id:
+                base_capability = capability_id.split(".")[0]
+                if base_capability in CAPABILITY_TO_SENSOR:
+                    # Skip internal Homey maintenance buttons (same logic as button.py)
+                    capability_lower = capability_id.lower()
+                    if any(keyword in capability_lower for keyword in ["migrate", "reset", "identify"]):
+                        _LOGGER.debug("Skipping internal Homey maintenance capability: %s", capability_id)
+                        continue
+                    entities.append(
+                        HomeySensor(coordinator, device_id, device, capability_id, api, zones)
+                    )
 
     async_add_entities(entities)
 
@@ -196,8 +256,30 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
         self._capability_id = capability_id
         self._api = api
 
-        sensor_config = CAPABILITY_TO_SENSOR[capability_id]
-        self._attr_name = f"{device.get('name', 'Unknown')} {capability_id.replace('measure_', '').replace('_', ' ').title()}"
+        # Handle sub-capabilities (e.g., measure_temperature.inside)
+        base_capability = capability_id.split(".")[0] if "." in capability_id else capability_id
+        sensor_config = CAPABILITY_TO_SENSOR.get(base_capability)
+        
+        if not sensor_config:
+            # Unknown capability - create generic sensor
+            _LOGGER.warning("Unknown sensor capability: %s for device %s", capability_id, device_id)
+            sensor_config = {
+                "device_class": None,
+                "state_class": SensorStateClass.MEASUREMENT,
+                "unit": None,
+            }
+        
+        # Generate entity name - handle sub-capabilities
+        if "." in capability_id:
+            # Sub-capability: "measure_temperature.inside" -> "Inside Temperature"
+            parts = capability_id.split(".")
+            base_name = parts[0].replace("measure_", "").replace("meter_", "").replace("_", " ").title()
+            sub_name = parts[1].replace("_", " ").title()
+            self._attr_name = f"{device.get('name', 'Unknown')} {sub_name} {base_name}"
+        else:
+            # Regular capability
+            self._attr_name = f"{device.get('name', 'Unknown')} {capability_id.replace('measure_', '').replace('meter_', '').replace('_', ' ').title()}"
+        
         self._attr_unique_id = f"homey_{device_id}_{capability_id}"
         self._attr_device_class = sensor_config.get("device_class")
         self._attr_state_class = sensor_config.get("state_class")
@@ -219,8 +301,9 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
             value_float = float(value)
             
             # Check if this is a percentage sensor that might be normalized
-            # measure_humidity and measure_soil_moisture might return normalized 0-1
-            if self._capability_id in ("measure_humidity", "measure_soil_moisture"):
+            # measure_humidity, measure_soil_moisture, and measure_battery might return normalized 0-1
+            base_capability = self._capability_id.split(".")[0] if "." in self._capability_id else self._capability_id
+            if base_capability in ("measure_humidity", "measure_soil_moisture", "measure_battery"):
                 # Check capability max to determine if normalized
                 cap_max = capability.get("max", 100)
                 if cap_max <= 1.0:

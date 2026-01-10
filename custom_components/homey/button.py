@@ -17,6 +17,34 @@ from .device_info import get_device_info
 _LOGGER = logging.getLogger(__name__)
 
 
+def is_maintenance_button(capability_id: str, capability_obj: dict[str, Any]) -> bool:
+    """Check if a button capability is a maintenance action.
+    
+    Reference: https://apps.developer.homey.app/the-basics/devices/capabilities#maintenance-actions
+    
+    Args:
+        capability_id: The capability ID (e.g., "button.identify", "button.reset_meter")
+        capability_obj: The capability object from capabilitiesObj
+        
+    Returns:
+        True if this is a maintenance button that should be excluded
+    """
+    # Check maintenanceAction property first (most reliable)
+    if capability_obj.get("maintenanceAction", False):
+        return True
+    
+    # Fallback: Check capability name for maintenance keywords
+    capability_lower = capability_id.lower()
+    maintenance_keywords = [
+        "migrate", "migration", "migrate_v3",
+        "reset", "reset_meter",
+        "identify",
+        "calibrate", "calibration",
+        "maintenance", "repair", "service",
+    ]
+    return any(keyword in capability_lower for keyword in maintenance_keywords)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -26,6 +54,79 @@ async def async_setup_entry(
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+    
+    # Clean up existing maintenance button entities from entity registry
+    # This removes entities that were created before filtering was added
+    from homeassistant.helpers import entity_registry as er
+    entity_registry = er.async_get(hass)
+    
+    # Get devices to check capabilities
+    devices = coordinator.data if coordinator.data else await api.get_devices()
+    from . import filter_devices
+    devices = filter_devices(devices, entry.data.get("device_filter"))
+    
+    # Get all button entities for this integration and remove maintenance buttons
+    # This removes entities that were created before filtering was added
+    maintenance_buttons_removed = 0
+    maintenance_keywords = ["migrate", "migration", "identify", "reset", "calibrate"]
+    
+    for entity_entry in list(entity_registry.entities.values()):
+        # Check if this is a button entity from our integration
+        if entity_entry.platform == DOMAIN and entity_entry.domain == "button":
+            unique_id = entity_entry.unique_id
+            entity_id = entity_entry.entity_id
+            
+            # Simple check: if entity name or unique_id contains maintenance keywords, remove it
+            entity_lower = entity_id.lower()
+            unique_id_lower = (unique_id or "").lower()
+            
+            # Check entity name (e.g., "Hue ambiance spot 1 Migrate V3 Button")
+            if any(keyword in entity_lower for keyword in maintenance_keywords):
+                entity_registry.async_remove(entity_entry.entity_id)
+                maintenance_buttons_removed += 1
+                _LOGGER.info("Removed maintenance button entity by name: %s", entity_entry.entity_id)
+                continue
+            
+            # Also check unique_id for maintenance button patterns
+            # Format: "homey_{device_id}_{capability_id}"
+            # Example: "homey_011cf5be-2522-45b5-b40f-0fdbfab64fb4_button.migrate_v3"
+            if unique_id and unique_id.startswith("homey_") and "_button" in unique_id:
+                # Check unique_id for maintenance keywords
+                if any(keyword in unique_id_lower for keyword in maintenance_keywords):
+                    entity_registry.async_remove(entity_entry.entity_id)
+                    maintenance_buttons_removed += 1
+                    _LOGGER.info("Removed maintenance button entity by unique_id: %s", entity_entry.entity_id)
+                    continue
+                
+                # Also try to parse and check capability object
+                try:
+                    # Split at "_button" to separate device_id from capability_id
+                    parts = unique_id.split("_button", 1)
+                    if len(parts) == 2:
+                        device_id_with_prefix = parts[0]  # "homey_{uuid}"
+                        capability_suffix = parts[1]  # ".migrate_v3"
+                        
+                        # Extract device_id (remove "homey_" prefix)
+                        if device_id_with_prefix.startswith("homey_"):
+                            device_id = device_id_with_prefix[6:]  # Remove "homey_"
+                            capability_id = f"button{capability_suffix}"  # "button.migrate_v3"
+                            
+                            # Check if device exists and capability is maintenance
+                            if device_id in devices:
+                                device = devices[device_id]
+                                capabilities = device.get("capabilitiesObj", {})
+                                capability_obj = capabilities.get(capability_id, {})
+                                
+                                if is_maintenance_button(capability_id, capability_obj):
+                                    entity_registry.async_remove(entity_entry.entity_id)
+                                    maintenance_buttons_removed += 1
+                                    _LOGGER.info("Removed maintenance button entity by capability check: %s (%s)", entity_entry.entity_id, capability_id)
+                except Exception as err:
+                    _LOGGER.debug("Error checking entity %s for maintenance button: %s", unique_id, err)
+                    continue
+    
+    if maintenance_buttons_removed > 0:
+        _LOGGER.info("Cleaned up %d existing maintenance button entities", maintenance_buttons_removed)
 
     entities = []
     flow_buttons_count = 0
@@ -69,14 +170,17 @@ async def async_setup_entry(
     for device_id, device in devices.items():
         capabilities = device.get("capabilitiesObj", {})
         # Check for button capabilities (button, button.1, button.2, etc.)
-        # Exclude internal Homey capabilities that shouldn't be exposed as buttons
+        # Exclude internal Homey maintenance capabilities that shouldn't be exposed as buttons
+        # Reference: https://apps.developer.homey.app/the-basics/devices/capabilities#maintenance-actions
         for capability_id in capabilities:
             if capability_id == "button" or capability_id.startswith("button."):
-                # Skip internal Homey capabilities (migration, reset, identify, etc.)
-                capability_lower = capability_id.lower()
-                if any(keyword in capability_lower for keyword in ["migrate", "reset", "identify"]):
-                    _LOGGER.debug("Skipping internal Homey capability: %s", capability_id)
+                capability_obj = capabilities.get(capability_id, {})
+                
+                # Skip maintenance action buttons
+                if is_maintenance_button(capability_id, capability_obj):
+                    _LOGGER.debug("Skipping maintenance action button: %s", capability_id)
                     continue
+                
                 entities.append(HomeyDeviceButton(coordinator, device_id, device, capability_id, api, zones))
                 device_buttons_count += 1
 

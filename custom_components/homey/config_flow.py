@@ -493,7 +493,9 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         for device_id, device in devices.items():
             capabilities = device.get("capabilitiesObj", {})
-            device_type = get_device_type(capabilities)
+            driver_uri = device.get("driverUri")
+            device_class = device.get("class")
+            device_type = get_device_type(capabilities, driver_uri, device_class)
             type_label = type_labels.get(device_type, "Device")
             zone_id = device.get("zone")
             
@@ -760,7 +762,9 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
         
         for device_id, device in devices.items():
             capabilities = device.get("capabilitiesObj", {})
-            device_type = get_device_type(capabilities)
+            driver_uri = device.get("driverUri")
+            device_class = device.get("class")
+            device_type = get_device_type(capabilities, driver_uri, device_class)
             type_label = type_labels.get(device_type, "Device")
             zone_id = device.get("zone")
             

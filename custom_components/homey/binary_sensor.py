@@ -66,6 +66,23 @@ async def async_setup_entry(
                 entities.append(
                     HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones)
                 )
+        
+        # Also handle sub-capabilities (capabilities with dots, e.g., alarm_motion.outside)
+        # Reference: https://apps.developer.homey.app/the-basics/devices/capabilities#sub-capabilities-using-the-same-capability-more-than-once
+        # BUT exclude internal Homey maintenance buttons (migration, reset, identify, etc.)
+        for capability_id in capabilities:
+            # Check if this is a sub-capability of a known binary sensor capability
+            if "." in capability_id:
+                base_capability = capability_id.split(".")[0]
+                if base_capability in CAPABILITY_TO_DEVICE_CLASS:
+                    # Skip internal Homey maintenance buttons (same logic as button.py)
+                    capability_lower = capability_id.lower()
+                    if any(keyword in capability_lower for keyword in ["migrate", "reset", "identify"]):
+                        _LOGGER.debug("Skipping internal Homey maintenance capability: %s", capability_id)
+                        continue
+                    entities.append(
+                        HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones)
+                    )
 
     async_add_entities(entities)
 
@@ -89,9 +106,22 @@ class HomeyBinarySensor(CoordinatorEntity, BinarySensorEntity):
         self._capability_id = capability_id
         self._api = api
 
-        self._attr_name = f"{device.get('name', 'Unknown')} {capability_id.replace('alarm_', '').replace('_', ' ').title()}"
+        # Handle sub-capabilities (e.g., alarm_motion.outside)
+        base_capability = capability_id.split(".")[0] if "." in capability_id else capability_id
+        
+        # Generate entity name - handle sub-capabilities
+        if "." in capability_id:
+            # Sub-capability: "alarm_motion.outside" -> "Outside Motion"
+            parts = capability_id.split(".")
+            base_name = parts[0].replace("alarm_", "").replace("_", " ").title()
+            sub_name = parts[1].replace("_", " ").title()
+            self._attr_name = f"{device.get('name', 'Unknown')} {sub_name} {base_name}"
+        else:
+            # Regular capability
+            self._attr_name = f"{device.get('name', 'Unknown')} {capability_id.replace('alarm_', '').replace('_', ' ').title()}"
+        
         self._attr_unique_id = f"homey_{device_id}_{capability_id}"
-        self._attr_device_class = CAPABILITY_TO_DEVICE_CLASS.get(capability_id)
+        self._attr_device_class = CAPABILITY_TO_DEVICE_CLASS.get(base_capability)
 
         self._attr_device_info = get_device_info(device_id, device, zones)
 
