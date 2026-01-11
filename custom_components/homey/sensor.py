@@ -353,13 +353,64 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
         capability_data = capabilities.get(capability_id, {})
         unit_from_capability = capability_data.get("units")
         
+        # Check if this is a price sensor that needs energy price format (currency/kWh)
+        is_price_sensor = capability_id in ["measure_price_total", "measure_price_lowest", "measure_price_highest"]
+        
         # Use unit from capability data if available, otherwise use configured unit
         if unit_from_capability:
-            self._attr_native_unit_of_measurement = unit_from_capability
+            if is_price_sensor:
+                # Convert currency symbol to currency code + /kWh format for Energy dashboard
+                unit_normalized = self._normalize_price_unit(unit_from_capability)
+                self._attr_native_unit_of_measurement = unit_normalized
+            else:
+                self._attr_native_unit_of_measurement = unit_from_capability
         else:
             self._attr_native_unit_of_measurement = sensor_config.get("unit")
 
         self._attr_device_info = get_device_info(device_id, device, zones)
+    
+    def _normalize_price_unit(self, unit: str) -> str:
+        """Normalize price sensor units to currency/kWh format for Home Assistant Energy dashboard.
+        
+        Converts currency symbols to currency codes and appends /kWh.
+        Examples:
+        - "¤" -> "SEK/kWh" (generic currency symbol, default to SEK)
+        - "€" -> "EUR/kWh"
+        - "$" -> "USD/kWh"
+        - "kr" -> "SEK/kWh" (Swedish/Norwegian/Danish krone)
+        - "SEK" -> "SEK/kWh" (already a code)
+        - "SEK/kWh" -> "SEK/kWh" (already formatted)
+        """
+        if not unit:
+            return "SEK/kWh"  # Default fallback
+        
+        unit = unit.strip()
+        
+        # If already in currency/kWh format, return as-is
+        if "/kWh" in unit or "/Wh" in unit:
+            return unit
+        
+        # Map currency symbols to currency codes
+        currency_map = {
+            "¤": "SEK",  # Generic currency symbol - default to SEK (common for Tibber users)
+            "€": "EUR",
+            "$": "USD",
+            "£": "GBP",
+            "¥": "JPY",
+            "kr": "SEK",  # Swedish/Norwegian/Danish krone
+            "SEK": "SEK",
+            "EUR": "EUR",
+            "USD": "USD",
+            "GBP": "GBP",
+            "NOK": "NOK",
+            "DKK": "DKK",
+        }
+        
+        # Convert symbol to code
+        currency_code = currency_map.get(unit, unit.upper())
+        
+        # Append /kWh for Energy dashboard compatibility
+        return f"{currency_code}/kWh"
 
     @property
     def native_value(self) -> float | None:
