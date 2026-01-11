@@ -27,23 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [1.1.3] - 2026-01-11
-
-### Added
-
-#### Multi-Branch Release System
-- **Dev Branch**: Created `dev` branch for development builds with version numbering (e.g., `1.1.4-dev.1`)
-- **Beta Branch**: Created `beta` branch for pre-release testing with version numbering (e.g., `1.1.4-beta.1`)
-- **Release Tags**: Added release tags for beta and dev branches (`v1.1.4-beta.1`, `v1.1.4-dev.1`)
-- **Branch Switching Documentation**: Added comprehensive guide for switching between Stable/Beta/Dev release channels in HACS
-
-### Changed
-
-#### Documentation
-- **Table of Contents**: Updated to include branch switching instructions
-- **HACS Installation Guide**: Added detailed instructions for switching between release channels
-
----
-
 ## [1.1.3] - 2026-01-11
 
 ### 🎉 Major Device Classification and Capability Support Update
