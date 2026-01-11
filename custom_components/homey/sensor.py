@@ -381,9 +381,19 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
                     # Use detected currency from price sensors
                     self._attr_native_unit_of_measurement = detected_currency
                 else:
-                    # Convert currency symbol to currency code for accumulated cost (e.g., "¤" -> "SEK")
-                    unit_normalized = self._normalize_currency_unit(unit_from_capability)
-                    self._attr_native_unit_of_measurement = unit_normalized
+                    # Only normalize if we have a specific currency symbol (not generic "¤")
+                    # If it's "¤" or unknown, leave unit empty so user can customize it
+                    if unit_from_capability and unit_from_capability.strip() != "¤":
+                        unit_normalized = self._normalize_currency_unit(unit_from_capability)
+                        # Only set if we got a valid currency code (not the generic fallback)
+                        if len(unit_normalized) == 3 and unit_normalized.isalpha() and unit_normalized.isupper():
+                            self._attr_native_unit_of_measurement = unit_normalized
+                        else:
+                            # Unknown currency, leave empty
+                            self._attr_native_unit_of_measurement = None
+                    else:
+                        # Generic currency symbol or no unit - leave empty for user customization
+                        self._attr_native_unit_of_measurement = None
             elif self._attr_device_class == SensorDeviceClass.ENERGY and base_capability == "meter_power":
                 # For energy sensors (meter_power.*), ensure unit is kWh for Energy dashboard compatibility
                 # If unit is already kWh or similar, use it; otherwise default to kWh
@@ -448,26 +458,26 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
         
         Converts currency symbols to currency codes for better display in Home Assistant.
         Examples:
-        - "¤" -> "SEK" (generic currency symbol, default to SEK)
         - "€" -> "EUR"
         - "$" -> "USD"
         - "kr" -> "SEK" (Swedish/Norwegian/Danish krone)
         - "SEK" -> "SEK" (already a code)
         
+        Note: Generic currency symbol "¤" is NOT normalized here - caller should handle it.
+        
         Args:
             unit: Currency unit string from Homey (symbol or code)
             
         Returns:
-            Currency code (e.g., "SEK", "EUR", "USD")
+            Currency code (e.g., "EUR", "USD", "SEK") or original unit if unknown
         """
         if not unit:
-            return "SEK"  # Default fallback
+            return unit
         
         unit = unit.strip()
         
-        # Map currency symbols to currency codes
+        # Map currency symbols to currency codes (excluding generic "¤")
         currency_map = {
-            "¤": "SEK",  # Generic currency symbol - default to SEK (common for Tibber users)
             "€": "EUR",
             "$": "USD",
             "£": "GBP",
