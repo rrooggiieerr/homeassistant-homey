@@ -188,6 +188,32 @@ CAPABILITY_TO_SENSOR = {
         "state_class": SensorStateClass.MEASUREMENT,
         "unit": "lx",
     },
+    # Tibber price sensors
+    "measure_price_level": {
+        "device_class": None,  # Price level (low/normal/high)
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": None,  # Unitless - just a level indicator
+    },
+    "measure_price_info_level": {
+        "device_class": None,  # Price info level
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": None,  # Unitless
+    },
+    "measure_price_lowest": {
+        "device_class": None,  # Lowest price
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": None,  # Will be set from capability data (e.g., SEK/kWh)
+    },
+    "measure_price_highest": {
+        "device_class": None,  # Highest price
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": None,  # Will be set from capability data (e.g., SEK/kWh)
+    },
+    "measure_price_total": {
+        "device_class": None,  # Total price
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": None,  # Will be set from capability data (e.g., SEK/kWh)
+    },
 }
 
 
@@ -307,7 +333,18 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"homey_{device_id}_{capability_id}"
         self._attr_device_class = sensor_config.get("device_class")
         self._attr_state_class = sensor_config.get("state_class")
-        self._attr_native_unit_of_measurement = sensor_config.get("unit")
+        
+        # Get unit from capability data if available (important for price sensors, etc.)
+        # This ensures sensors like Tibber price sensors get their units (e.g., SEK/kWh) from Homey
+        capabilities = device.get("capabilitiesObj", {})
+        capability_data = capabilities.get(capability_id, {})
+        unit_from_capability = capability_data.get("units")
+        
+        # Use unit from capability data if available, otherwise use configured unit
+        if unit_from_capability:
+            self._attr_native_unit_of_measurement = unit_from_capability
+        else:
+            self._attr_native_unit_of_measurement = sensor_config.get("unit")
 
         self._attr_device_info = get_device_info(device_id, device, zones)
 
