@@ -1,9 +1,12 @@
 """Helper functions for device info."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from .const import DOMAIN
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def get_device_type(capabilities: dict[str, Any], driver_uri: str | None = None, device_class: str | None = None) -> str:

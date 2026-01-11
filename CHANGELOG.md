@@ -80,6 +80,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Maintenance Buttons Appearing**: Fixed issue where maintenance buttons (migrate, identify, reset) were appearing as entities in Home Assistant
 - **Entity Cleanup**: Added automatic removal of existing maintenance button entities on integration reload
 
+#### Configuration Flow Bugfix
+- **Missing Logger Import**: Fixed `NameError: name '_LOGGER' is not defined` error in config flow by adding missing logger import to `device_info.py` module
+
 ### Changed
 
 #### Device Type Detection Logic
