@@ -238,15 +238,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         
         # If entity_id provided, extract flow_id from the entity
         if entity_id:
+            # Handle both full entity_id (e.g., "button.sova") and just the entity name
+            entity_id_str = str(entity_id)
+            if not entity_id_str.startswith("button."):
+                entity_id_str = f"button.{entity_id_str}"
+            
             entity_registry = dr.async_get(hass)
-            entity = entity_registry.async_get(entity_id)
+            entity = entity_registry.async_get(entity_id_str)
             if entity and entity.platform == DOMAIN and entity.unique_id:
                 # Extract flow_id from unique_id format: "homey_{flow_id}_flow"
                 unique_id_parts = entity.unique_id.split("_")
                 if len(unique_id_parts) >= 3 and unique_id_parts[-1] == "flow":
                     # Reconstruct flow_id (may contain underscores)
                     flow_id = "_".join(unique_id_parts[1:-1])
-                    _LOGGER.debug("Extracted flow_id %s from entity %s", flow_id, entity_id)
+                    _LOGGER.debug("Extracted flow_id %s from entity %s", flow_id, entity_id_str)
+            else:
+                # If entity not found, try to use entity_id as flow_name
+                _LOGGER.debug("Entity %s not found in registry, trying as flow_name", entity_id_str)
+                flow_name = entity_id_str.replace("button.", "").strip()
         
         if not flow_id and not flow_name:
             _LOGGER.error("Either flow_id, flow_name, or entity_id must be provided")
@@ -283,20 +292,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.error("Failed to trigger Homey flow: %s", flow_id)
 
     # Register service with schema that includes entity selector for flow buttons
+    # The EntitySelector will show a dropdown of available Homey flow button entities
+    # Note: In button card UI, you may need to manually enter entity_id if dropdown doesn't appear
+    # Format: button.<flow_name> (e.g., button.sova)
+    import voluptuous as vol
+    
     hass.services.async_register(
         DOMAIN,
         "trigger_flow",
         async_trigger_flow,
-        schema={
-            "entity_id": selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain="button",
-                    integration=DOMAIN,
-                )
+        schema=vol.Schema({
+            vol.Optional("entity_id"): vol.Any(
+                selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="button",
+                        integration=DOMAIN,
+                        multiple=False,
+                    )
+                ),
+                vol.Coerce(str),  # Allow string input as fallback
             ),
-            "flow_id": selector.TextSelector(),
-            "flow_name": selector.TextSelector(),
-        },
+            vol.Optional("flow_id"): selector.TextSelector(
+                selector.TextSelectorConfig(type="text")
+            ),
+            vol.Optional("flow_name"): selector.TextSelector(
+                selector.TextSelectorConfig(type="text")
+            ),
+        }),
     )
 
     # Register service to enable flows
