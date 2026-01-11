@@ -249,6 +249,40 @@ When a new version is available:
 
 **Note**: HACS will automatically check for updates and notify you when new versions are available.
 
+#### Switching Between Release Channels (Stable/Beta/Dev)
+
+This integration offers three release channels:
+
+- **Stable** (main branch): Production-ready releases (e.g., `1.1.3`)
+- **Beta** (beta branch): Pre-release testing versions (e.g., `1.1.4-beta.1`)
+- **Dev** (dev branch): Latest development builds (e.g., `1.1.4-dev.1`)
+
+**To switch to Beta or Dev:**
+
+1. **Remove current installation:**
+   - Go to **HACS** → **Integrations** → **Homey Integration**
+   - Click the three dots menu (⋮) → **Remove** or **Uninstall**
+
+2. **Add custom repository with branch:**
+   - In HACS, click the three dots menu (⋮) in the top-right corner
+   - Select **Custom repositories**
+   - Click **Add**
+   - Enter:
+     - **Repository**: `https://github.com/ifMike/homeyHASS`
+     - **Category**: **Integration**
+     - **Branch**: Select `beta` for Beta or `dev` for Dev (leave empty for Stable)
+   - Click **Add**
+
+3. **Install from selected branch:**
+   - Search for **"Homey"** in HACS Integrations
+   - Click on **Homey Integration**
+   - Click **Download**
+   - The version number will show which branch you're on (e.g., `1.1.4-beta.1` or `1.1.4-dev.1`)
+
+4. **Restart Home Assistant**
+
+**Note**: When switching branches, your configuration and devices are preserved. You can switch back to Stable at any time by removing and reinstalling without specifying a branch.
+
 ### Migrating from Manual Installation to HACS
 
 If you previously installed this integration manually and want to switch to HACS for easier updates:
