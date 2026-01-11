@@ -74,22 +74,32 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
         if "target_humidity" in capabilities:
             supported_features |= ClimateEntityFeature.TARGET_HUMIDITY
         
-        # Check for on/off capabilities (onoff, thermofloor_onoff, etc.)
-        # Store which on/off capability to use
+        # Check for on/off capabilities (onoff, etc.)
+        # Only use settable on/off capabilities for turn_on/turn_off actions
+        # Note: thermofloor_onoff is read-only (status indicator), not a control
         self._onoff_capability = None
         if "onoff" in capabilities:
-            self._onoff_capability = "onoff"
-            supported_features |= ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF
-        elif "thermofloor_onoff" in capabilities:
-            self._onoff_capability = "thermofloor_onoff"
-            supported_features |= ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF
+            onoff_cap = capabilities.get("onoff", {})
+            # Only use if it's settable
+            if onoff_cap.get("setable", False):
+                self._onoff_capability = "onoff"
+                supported_features |= ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF
         else:
-            # Check for any *_onoff capability
+            # Check for any *_onoff capability that is settable
             for cap_id in capabilities:
                 if cap_id.endswith("_onoff") and capabilities[cap_id].get("type") == "boolean":
-                    self._onoff_capability = cap_id
-                    supported_features |= ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF
-                    break
+                    cap_data = capabilities[cap_id]
+                    # Only use if it's settable (not read-only status indicators)
+                    if cap_data.get("setable", False):
+                        self._onoff_capability = cap_id
+                        supported_features |= ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF
+                        break
+        
+        # If no settable on/off capability, we can still support turn_on/turn_off via HVAC mode changes
+        # This handles devices like ThermoFloor that use mode for control (thermofloor_mode)
+        if not self._onoff_capability:
+            # We'll determine hvac_modes first, then add TURN_ON/TURN_OFF if appropriate
+            pass
         
         self._attr_supported_features = supported_features
         hvac_modes = []
@@ -159,6 +169,15 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
             hvac_modes = [HVACMode.HEAT_COOL]
         
         self._attr_hvac_modes = hvac_modes
+        
+        # If no settable on/off capability but we have HVAC modes, support turn_on/turn_off via mode changes
+        # This handles devices like ThermoFloor that use mode for control (thermofloor_mode)
+        if not self._onoff_capability and hvac_modes:
+            # Only add TURN_ON/TURN_OFF if we have OFF mode and at least one non-OFF mode
+            has_off_mode = HVACMode.OFF in hvac_modes
+            has_non_off_mode = any(mode != HVACMode.OFF for mode in hvac_modes)
+            if has_off_mode and has_non_off_mode:
+                self._attr_supported_features |= ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF
         
         # Get current mode from device
         current_mode = None
