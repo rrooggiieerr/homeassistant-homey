@@ -258,7 +258,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 flow_name = entity_id_str.replace("button.", "").strip()
         
         if not flow_id and not flow_name:
-            _LOGGER.error("Either flow_id, flow_name, or entity_id must be provided")
+            # Provide helpful error message with what was actually provided
+            provided_data = {k: v for k, v in call.data.items() if v is not None and v != ""}
+            _LOGGER.error(
+                "homey.trigger_flow service called without required parameters. "
+                "Either 'entity_id', 'flow_id', or 'flow_name' must be provided. "
+                "Provided data: %s. "
+                "Example: service: homey.trigger_flow, data: {entity_id: 'button.sova'} or {flow_name: 'Sova'}",
+                provided_data
+            )
             return
         
         # If flow_name provided, find flow_id

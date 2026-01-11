@@ -285,7 +285,8 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
         
         if not sensor_config:
             # Unknown capability - create generic sensor
-            _LOGGER.warning("Unknown sensor capability: %s for device %s", capability_id, device_id)
+            # This is expected behavior - we create sensors for all measure_* and meter_* capabilities
+            _LOGGER.debug("Creating generic sensor for unknown capability: %s for device %s", capability_id, device_id)
             sensor_config = {
                 "device_class": None,
                 "state_class": SensorStateClass.MEASUREMENT,
