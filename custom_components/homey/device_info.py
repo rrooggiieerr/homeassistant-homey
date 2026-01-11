@@ -105,7 +105,8 @@ def get_device_type(capabilities: dict[str, Any], driver_uri: str | None = None,
     # PRIORITY 7: Switch devices (onoff capability)
     # IMPORTANT: This comes BEFORE sensors because devices with onoff + measure_power
     # should be classified as switches (with sensor entities), not sensors
-    if "onoff" in caps:
+    # Check for regular onoff capability OR sub-capabilities (onoff.output1, onoff.output2, etc.)
+    if "onoff" in caps or any(cap.startswith("onoff.") for cap in caps):
         return "switch"
     
     # PRIORITY 8: Sensor devices (only if no control capabilities found)
@@ -133,12 +134,12 @@ def get_device_type(capabilities: dict[str, Any], driver_uri: str | None = None,
         # Fibaro switches/outlets - should be switches if they have onoff
         # Note: Roller shutters already handled above (windowcoverings_state)
         if "fibaro" in driver_lower:
-            if "onoff" in caps:
+            if "onoff" in caps or any(cap.startswith("onoff.") for cap in caps):
                 return "switch"
         
         # Shelly devices - should be switches if they have onoff
         if "shelly" in driver_lower:
-            if "onoff" in caps:
+            if "onoff" in caps or any(cap.startswith("onoff.") for cap in caps):
                 return "switch"
         
         # Sunricher dimming devices - should be lights if they have onoff and dim
