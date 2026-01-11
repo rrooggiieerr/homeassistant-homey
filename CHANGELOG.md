@@ -27,7 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [1.1.3] - 2026-01-11
-## [1.1.3] - 2026-01-11
 
 ### 🎉 Major Device Classification and Capability Support Update
 
