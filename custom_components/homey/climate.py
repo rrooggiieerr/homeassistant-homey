@@ -77,15 +77,47 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
         self._attr_supported_features = supported_features
         hvac_modes = []
         
-        # Check for thermostat mode capabilities
+        # Check for custom thermostat mode capabilities (e.g., thermofloor_mode)
+        # These are enum capabilities with mode values
+        custom_mode_cap = None
+        for cap_id in capabilities:
+            if cap_id.endswith("_mode") and cap_id != "thermostat_mode" and capabilities[cap_id].get("type") == "enum":
+                custom_mode_cap = cap_id
+                break
+        
+        # Check for standard thermostat mode capabilities
         has_mode_off = "thermostat_mode_off" in capabilities
         has_mode_heat = "thermostat_mode_heat" in capabilities
         has_mode_cool = "thermostat_mode_cool" in capabilities
         has_mode_auto = "thermostat_mode_auto" in capabilities
         has_mode = "thermostat_mode" in capabilities
         
-        # If we have specific mode capabilities, use them
-        if has_mode_off or has_mode_heat or has_mode_cool or has_mode_auto or has_mode:
+        # Handle custom mode capabilities (e.g., thermofloor_mode)
+        if custom_mode_cap:
+            mode_cap_data = capabilities[custom_mode_cap]
+            mode_values = mode_cap_data.get("values", [])
+            # Map custom mode values to HVAC modes
+            # Example: thermofloor_mode has ["Heat", "Energy Save Heat", "Off", "Cool"]
+            for mode_value in mode_values:
+                mode_id = mode_value.get("id", mode_value.get("title", mode_value)) if isinstance(mode_value, dict) else str(mode_value)
+                mode_id_lower = mode_id.lower()
+                if "off" in mode_id_lower or mode_id_lower == "off":
+                    if HVACMode.OFF not in hvac_modes:
+                        hvac_modes.append(HVACMode.OFF)
+                elif "heat" in mode_id_lower or mode_id_lower == "heat":
+                    if HVACMode.HEAT not in hvac_modes:
+                        hvac_modes.append(HVACMode.HEAT)
+                elif "cool" in mode_id_lower or mode_id_lower == "cool":
+                    if HVACMode.COOL not in hvac_modes:
+                        hvac_modes.append(HVACMode.COOL)
+                elif "auto" in mode_id_lower or "energy" in mode_id_lower or "save" in mode_id_lower:
+                    # Energy Save mode maps to AUTO or HEAT_COOL
+                    if HVACMode.AUTO not in hvac_modes:
+                        hvac_modes.append(HVACMode.AUTO)
+            # Store custom mode capability for later use
+            self._custom_mode_capability = custom_mode_cap
+        # If we have standard mode capabilities, use them
+        elif has_mode_off or has_mode_heat or has_mode_cool or has_mode_auto or has_mode:
             if has_mode_off or has_mode:
                 hvac_modes.append(HVACMode.OFF)
             if has_mode_heat or has_mode:
@@ -97,24 +129,58 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
             # If we have multiple modes but not AUTO, add HEAT_COOL as fallback
             if not has_mode_auto and (has_mode_heat and has_mode_cool):
                 hvac_modes.append(HVACMode.HEAT_COOL)
+            self._custom_mode_capability = None
         else:
             # Fallback to original behavior: HEAT_COOL mode
             hvac_modes = [HVACMode.HEAT_COOL]
             if "onoff" in capabilities:
                 hvac_modes.append(HVACMode.OFF)
+            self._custom_mode_capability = None
         
         # Ensure we have at least one mode
         if not hvac_modes:
             hvac_modes = [HVACMode.HEAT_COOL]
         
         self._attr_hvac_modes = hvac_modes
-        # Set initial mode - prefer AUTO if available, otherwise HEAT_COOL, otherwise first mode
-        if HVACMode.AUTO in hvac_modes:
+        
+        # Get current mode from device
+        current_mode = None
+        if hasattr(self, "_custom_mode_capability") and self._custom_mode_capability:
+            mode_cap_data = capabilities.get(self._custom_mode_capability, {})
+            mode_value = mode_cap_data.get("value")
+            if mode_value:
+                mode_id = mode_value.get("id", mode_value.get("title", mode_value)) if isinstance(mode_value, dict) else str(mode_value)
+                mode_id_lower = mode_id.lower()
+                if "off" in mode_id_lower or mode_id_lower == "off":
+                    current_mode = HVACMode.OFF
+                elif "heat" in mode_id_lower and "energy" in mode_id_lower:
+                    current_mode = HVACMode.AUTO  # Energy Save Heat = AUTO
+                elif "heat" in mode_id_lower:
+                    current_mode = HVACMode.HEAT
+                elif "cool" in mode_id_lower:
+                    current_mode = HVACMode.COOL
+                elif "auto" in mode_id_lower:
+                    current_mode = HVACMode.AUTO
+        elif "thermostat_mode" in capabilities:
+            mode_value = capabilities.get("thermostat_mode", {}).get("value")
+            if mode_value:
+                mode_mapping = {
+                    "off": HVACMode.OFF,
+                    "heat": HVACMode.HEAT,
+                    "cool": HVACMode.COOL,
+                    "auto": HVACMode.AUTO,
+                }
+                current_mode = mode_mapping.get(str(mode_value).lower())
+        
+        # Set initial mode - use current mode if available, otherwise prefer AUTO, then HEAT_COOL, then first mode
+        if current_mode and current_mode in hvac_modes:
+            self._attr_hvac_mode = current_mode
+        elif HVACMode.AUTO in hvac_modes:
             self._attr_hvac_mode = HVACMode.AUTO
         elif HVACMode.HEAT_COOL in hvac_modes:
             self._attr_hvac_mode = HVACMode.HEAT_COOL
         else:
-            self._attr_hvac_mode = hvac_modes[0]
+            self._attr_hvac_mode = hvac_modes[0] if hvac_modes else HVACMode.HEAT_COOL
 
         # Get temperature range from capability
         # Home Assistant requires min/max temp to show temperature controls
@@ -271,8 +337,32 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
         device_data = self.coordinator.data.get(self._device_id, self._device)
         capabilities = device_data.get("capabilitiesObj", {})
         
+        # Check if we have a custom mode capability (e.g., thermofloor_mode)
+        if hasattr(self, "_custom_mode_capability") and self._custom_mode_capability:
+            mode_cap = capabilities.get(self._custom_mode_capability, {})
+            mode_values = mode_cap.get("values", [])
+            # Map HVACMode to custom mode values
+            target_modes = []
+            if hvac_mode == HVACMode.OFF:
+                target_modes = ["off", "Off"]
+            elif hvac_mode == HVACMode.HEAT:
+                target_modes = ["heat", "Heat"]
+            elif hvac_mode == HVACMode.COOL:
+                target_modes = ["cool", "Cool"]
+            elif hvac_mode == HVACMode.AUTO:
+                target_modes = ["auto", "Auto", "Energy Save Heat", "Energy Save"]
+            elif hvac_mode == HVACMode.HEAT_COOL:
+                target_modes = ["auto", "Auto"]
+            
+            # Find matching mode value
+            for mode_value_obj in mode_values:
+                mode_id = mode_value_obj.get("id", mode_value_obj.get("title", mode_value_obj)) if isinstance(mode_value_obj, dict) else str(mode_value_obj)
+                if mode_id in target_modes or mode_id.lower() in [m.lower() for m in target_modes]:
+                    await self._api.set_capability_value(self._device_id, self._custom_mode_capability, mode_id)
+                    await self.coordinator.async_refresh_device(self._device_id)
+                    return
         # Check if device has thermostat_mode capability
-        if "thermostat_mode" in capabilities:
+        elif "thermostat_mode" in capabilities:
             # Map HVACMode to Homey thermostat mode values
             mode_mapping = {
                 HVACMode.OFF: "off",
@@ -295,6 +385,49 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
         
         # Immediately refresh this device's state for instant UI feedback
         await self.coordinator.async_refresh_device(self._device_id)
+    
+    @property
+    def hvac_mode(self) -> HVACMode:
+        """Return the current HVAC mode."""
+        device_data = self.coordinator.data.get(self._device_id, self._device)
+        capabilities = device_data.get("capabilitiesObj", {})
+        
+        # Check if we have a custom mode capability (e.g., thermofloor_mode)
+        if hasattr(self, "_custom_mode_capability") and self._custom_mode_capability:
+            mode_cap_data = capabilities.get(self._custom_mode_capability, {})
+            mode_value = mode_cap_data.get("value")
+            if mode_value:
+                mode_id = mode_value.get("id", mode_value.get("title", mode_value)) if isinstance(mode_value, dict) else str(mode_value)
+                mode_id_lower = mode_id.lower()
+                if "off" in mode_id_lower or mode_id_lower == "off":
+                    return HVACMode.OFF
+                elif "heat" in mode_id_lower and "energy" in mode_id_lower:
+                    return HVACMode.AUTO  # Energy Save Heat = AUTO
+                elif "heat" in mode_id_lower:
+                    return HVACMode.HEAT
+                elif "cool" in mode_id_lower:
+                    return HVACMode.COOL
+                elif "auto" in mode_id_lower:
+                    return HVACMode.AUTO
+        
+        # Check if device has thermostat_mode capability
+        if "thermostat_mode" in capabilities:
+            mode_value = capabilities.get("thermostat_mode", {}).get("value")
+            if mode_value:
+                mode_mapping = {
+                    "off": HVACMode.OFF,
+                    "heat": HVACMode.HEAT,
+                    "cool": HVACMode.COOL,
+                    "auto": HVACMode.AUTO,
+                }
+                return mode_mapping.get(str(mode_value).lower(), HVACMode.HEAT_COOL)
+        
+        # Fallback: check onoff capability
+        if "onoff" in capabilities:
+            is_on = capabilities.get("onoff", {}).get("value", False)
+            return HVACMode.OFF if not is_on else HVACMode.HEAT_COOL
+        
+        return self._attr_hvac_mode
 
     async def async_set_humidity(self, humidity: int) -> None:
         """Set new target humidity."""

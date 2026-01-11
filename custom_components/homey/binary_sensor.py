@@ -38,6 +38,8 @@ CAPABILITY_TO_DEVICE_CLASS = {
     "alarm_maintenance": None,  # Generic binary sensor
     "button": None,  # Generic binary sensor (BinarySensorDeviceClass.BUTTON may not be available in all versions)
     "vibration": None,  # Generic binary sensor
+    # Thermostat-specific binary sensors
+    "thermofloor_onoff": BinarySensorDeviceClass.RUNNING,  # Heating active/idle
 }
 
 
