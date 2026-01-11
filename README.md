@@ -47,6 +47,7 @@ This integration bridges your [Homey](https://homey.app) hub with Home Assistant
 - [Installation](#installation)
   - [Manual Installation](#manual-installation)
   - [Installation via HACS](#installation-via-hacs)
+  - [Switching Between Release Channels (Stable/Beta/Dev)](#switching-between-release-channels-stablebetadev)
   - [Migrating from Manual Installation to HACS](#migrating-from-manual-installation-to-hacs)
 - [Updating the Integration](#updating-the-integration)
 - [Configuration](#configuration)
