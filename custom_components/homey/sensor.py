@@ -375,9 +375,15 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
                 unit_normalized = self._normalize_price_unit(unit_from_capability)
                 self._attr_native_unit_of_measurement = unit_normalized
             elif is_accumulated_cost:
-                # Convert currency symbol to currency code for accumulated cost (e.g., "¤" -> "SEK")
-                unit_normalized = self._normalize_currency_unit(unit_from_capability)
-                self._attr_native_unit_of_measurement = unit_normalized
+                # Try to detect currency from other price sensors on the same device first
+                detected_currency = self._detect_currency_from_device(device, capabilities)
+                if detected_currency:
+                    # Use detected currency from price sensors
+                    self._attr_native_unit_of_measurement = detected_currency
+                else:
+                    # Convert currency symbol to currency code for accumulated cost (e.g., "¤" -> "SEK")
+                    unit_normalized = self._normalize_currency_unit(unit_from_capability)
+                    self._attr_native_unit_of_measurement = unit_normalized
             elif self._attr_device_class == SensorDeviceClass.ENERGY and base_capability == "meter_power":
                 # For energy sensors (meter_power.*), ensure unit is kWh for Energy dashboard compatibility
                 # If unit is already kWh or similar, use it; otherwise default to kWh
@@ -506,6 +512,45 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
         
         # Final fallback - return as-is if we can't determine
         return unit
+    
+    def _detect_currency_from_device(self, device: dict[str, Any], capabilities: dict[str, Any]) -> str | None:
+        """Detect currency code from other price sensors on the same device.
+        
+        Looks for measure_price_* sensors on the same device and extracts the currency code
+        from their units (e.g., "SEK/kWh" -> "SEK").
+        
+        Args:
+            device: Device dictionary from Homey
+            capabilities: Capabilities dictionary from device
+            
+        Returns:
+            Currency code (e.g., "SEK", "EUR", "USD") if detected, None otherwise
+        """
+        # Check price sensors on the same device
+        price_sensor_ids = ["measure_price_total", "measure_price_lowest", "measure_price_highest"]
+        
+        for price_sensor_id in price_sensor_ids:
+            price_capability = capabilities.get(price_sensor_id)
+            if price_capability:
+                price_unit = price_capability.get("units")
+                if price_unit:
+                    # Extract currency code from price unit (e.g., "SEK/kWh" -> "SEK")
+                    if "/" in price_unit:
+                        currency_code = price_unit.split("/")[0].strip()
+                        # Validate it's a currency code (3 letters, uppercase)
+                        if len(currency_code) == 3 and currency_code.isalpha() and currency_code.isupper():
+                            return currency_code
+                    # If it's already a currency code without /kWh, use it
+                    elif len(price_unit) == 3 and price_unit.isalpha() and price_unit.isupper():
+                        return price_unit
+                    # Try to normalize it (might be a symbol)
+                    else:
+                        normalized = self._normalize_currency_unit(price_unit)
+                        # If normalization worked and returned a valid code, use it
+                        if len(normalized) == 3 and normalized.isalpha() and normalized.isupper():
+                            return normalized
+        
+        return None
 
     @property
     def native_value(self) -> float | None:
