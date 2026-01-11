@@ -195,7 +195,7 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
         elif self._has_garagedoor:
             # Garage doors are binary - convert position to boolean
             # Position > 50% = open (False), <= 50% = closed (True)
-            await self._api.set_capability_value(
+        await self._api.set_capability_value(
                 self._device_id, "garagedoor_closed", position <= 50
         )
         # Immediately refresh this device's state for instant UI feedback
