@@ -162,10 +162,10 @@ class HomeyLight(CoordinatorEntity, LightEntity):
             color_modes.add(ColorMode.HS)
             _LOGGER.debug("Device %s (%s) supports HS color mode", device_id, device.get("name", "Unknown"))
         elif has_hue and not has_saturation:
-            # Device has hue but not saturation - still use HS mode but warn
-            # Some devices might expose hue without saturation, or saturation might be missing
-            _LOGGER.warning(
-                "Device %s (%s) has light_hue but not light_saturation - using HS mode but color may not work fully",
+            # Device has hue but not saturation - still use HS mode
+            # Some devices legitimately expose hue without saturation (e.g., some RGB-only devices)
+            _LOGGER.debug(
+                "Device %s (%s) has light_hue but not light_saturation - using HS mode",
                 device_id,
                 device.get("name", "Unknown")
             )

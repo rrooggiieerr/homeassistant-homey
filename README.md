@@ -4,7 +4,7 @@
 [![GitHub issues](https://img.shields.io/github/issues/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/issues)
 [![GitHub stars](https://img.shields.io/github/stars/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/stargazers)
 
-**Version**: 1.1.3 | **Last Updated**: 2026-01-11 | [Changelog](CHANGELOG.md)
+**Version**: 1.1.4-beta.2 | **Last Updated**: 2026-01-11 | [Changelog](CHANGELOG.md)
 
 A Home Assistant integration that automatically discovers and connects all your Homey devices, making them available natively in Home Assistant.
 
@@ -261,25 +261,32 @@ To receive automatic updates for beta and dev releases:
    - Enable **Show beta** (toggle it ON)
    - This allows HACS to check for prerelease versions
 
-2. **Enable Prerelease Updates for This Integration (Optional but Recommended):**
-   - Go to **Settings** → **Devices & Services** → **Entities**
-   - Search for `homey` or `hacs` to find HACS switch entities
-   - Look for a switch entity related to Homey Integration (e.g., `switch.hacs_homey_integration_show_beta`)
-   - Enable the switch to include prereleases in update checks for this specific integration
+2. **Install from the Correct Branch/Tag:**
+   - When installing, make sure to select the correct branch/tag:
+     - For **Stable**: Don't specify a branch (or select `main`)
+     - For **Beta**: Select `beta` branch/tag
+     - For **Dev**: Select `dev` branch/tag
+   - HACS will track the branch/tag you install from and show updates for that specific branch
+
+3. **Verify Branch Tracking:**
+   - After installing, check the integration details in HACS
+   - The "Installed version" should match your branch (e.g., `1.1.4-dev.4` for dev)
+   - The "Available version" should show updates for your branch, not stable
+   - If it shows stable as available when you're on dev/beta, you may need to reinstall from the correct branch
 
 **Important Note on Branch Tracking and Version Selection:**
 - Beta and Dev releases use moving tags (`beta` and `dev`) that always point to the latest commit
 - **When installing from dev/beta branch:**
-  - HACS will show `dev` or `beta` as the version name
-  - These tags are automatically updated when new commits are released
-  - HACS will detect updates when the tag moves to a new commit
-- **To update to the latest dev/beta version:**
-  1. Click **"Need a different version?"** to expand the version selector (if needed)
-  2. Select `dev` for dev branch or `beta` for beta branch
-  3. Click **DOWNLOAD** to install the selected version
-- After selecting `dev` or `beta`, HACS will track that tag and notify you when it's updated
+  - HACS will track the `dev` or `beta` tag you install from
+  - The "Available version" should show the latest dev/beta version, not stable
+  - HACS compares your installed version (e.g., `1.1.4-dev.3`) with the latest version on your branch (e.g., `1.1.4-dev.4`)
+- **If HACS shows stable as "Available version" when you're on dev/beta:**
+  1. Make sure "Show beta" is enabled in HACS Settings
+  2. Try clicking "Redownload" and selecting your branch (`dev` or `beta`) again
+  3. HACS should then track that branch and show branch-specific updates
+  4. You may need to reload HACS data: HACS → Settings → Reload Data
 
-**Note**: The `dev` and `beta` tags are moving tags that always point to the latest commit on their respective branches. This makes it easier for HACS to detect updates - you'll always see the latest version for your branch!
+**Note**: The `dev` and `beta` tags are moving tags that always point to the latest commit on their respective branches. HACS should track the branch/tag you install from and show updates for that branch only, not stable releases.
 
 #### Switching Between Release Channels (Stable/Beta/Dev)
 
@@ -647,12 +654,26 @@ The integration supports devices with the following capabilities:
 - `measure_soil_moisture` - Soil moisture sensor (%)
 - `measure_soil_temperature` - Soil temperature sensor (°C)
 - `measure_energy` - Energy consumption sensor (kWh) with proper state class for energy tracking
-- `meter_power` - Energy meter (kWh) with `TOTAL_INCREASING` state class
-- `meter_power.output1`, `meter_power.output2`, etc. - Multi-channel energy meters
+- `meter_power` - Energy meter (kWh) with `TOTAL_INCREASING` state class - **Energy Dashboard compatible**
+- `meter_power.imported` - Imported energy meter (kWh) - **Energy Dashboard compatible**
+- `meter_power.exported` - Exported energy meter (kWh) - **Energy Dashboard compatible**
+- `meter_power.output1`, `meter_power.output2`, etc. - Multi-channel energy meters - **Energy Dashboard compatible**
 - `meter_water` - Water meter (m³) with `TOTAL_INCREASING` state class
 - `meter_gas` - Gas meter (m³) with `TOTAL_INCREASING` state class
+- `measure_price_total` - Total electricity price (currency/kWh, e.g., SEK/kWh) - **Energy Dashboard compatible**
+- `measure_price_lowest` - Lowest electricity price (currency/kWh)
+- `measure_price_highest` - Highest electricity price (currency/kWh)
+- `accumulatedCost` - Accumulated energy cost (currency, e.g., SEK) - Auto-detects currency from price sensors
 
 **Sub-Capability Support**: The integration fully supports sub-capabilities (capabilities with dots, e.g., `measure_temperature.inside`, `measure_power.output1`). Each sub-capability creates its own sensor entity with a descriptive name.
+
+**Energy Dashboard Compatibility**: All energy sensors (`meter_power` and sub-capabilities) are configured with proper `device_class: energy` and `state_class: total_increasing` for Home Assistant's Energy dashboard. This allows you to track individual device energy consumption in the Energy dashboard.
+
+**Generic Sensor Support**: The integration automatically creates sensor entities for ANY `measure_*` or `meter_*` capability, even if not explicitly listed above. This ensures support for new device types and capabilities without code changes.
+
+**Energy Dashboard Compatibility**: All energy sensors (`meter_power` and sub-capabilities) are configured with proper `device_class: energy` and `state_class: total_increasing` for Home Assistant's Energy dashboard. This allows you to track individual device energy consumption in the Energy dashboard.
+
+**Generic Sensor Support**: The integration automatically creates sensor entities for ANY `measure_*` or `meter_*` capability, even if not explicitly listed above. This ensures support for new device types and capabilities without code changes.
 
 ### Binary Sensors
 - `alarm_motion` - Motion detector
@@ -671,6 +692,7 @@ The integration supports devices with the following capabilities:
 - `alarm_maintenance` - Maintenance required indicator
 - `button` - Physical button press detection
 - `vibration` - Vibration detection
+- `thermofloor_onoff` - Thermostat heating active/idle status (read-only status indicator)
 
 ### Covers
 - `windowcoverings_state` - Window covering position (0-100%)
@@ -690,8 +712,20 @@ The integration supports devices with the following capabilities:
 - `thermostat_mode_heat` - Heat mode capability
 - `thermostat_mode_cool` - Cool mode capability
 - `thermostat_mode_auto` - Auto mode capability
+- `thermofloor_mode` - Custom thermostat mode (e.g., ThermoFloor: Heat, Energy Save Heat, Off, Cool)
+- `*_mode` - Any custom enum capability ending with `_mode` is automatically detected and supported
 
 **Supported HVAC Modes**: OFF, HEAT, COOL, AUTO, HEAT_COOL (automatically detected based on available capabilities)
+
+**Custom Thermostat Support**: The integration automatically detects and supports custom thermostat mode capabilities (e.g., `thermofloor_mode`). Custom mode values are mapped to standard HVAC modes:
+- "Off" → OFF
+- "Heat" → HEAT
+- "Cool" → COOL
+- "Energy Save Heat" / "Auto" → AUTO
+
+**Turn On/Off Support**: Climate entities support `turn_on` and `turn_off` actions:
+- If device has a settable `onoff` capability, it's used for control
+- Otherwise, `turn_on` sets to first non-OFF mode, `turn_off` sets to OFF mode
 
 ### Fans
 - `fan_speed` - Fan speed control (0-100%)
@@ -727,9 +761,19 @@ The integration supports devices with the following capabilities:
 - `button.1`, `button.2`, etc. - Multi-button devices
 - Physical device buttons appear as Button entities for automation triggers
 
-### Number & Select Platforms
-- Ready for future capabilities that require numeric input or option selection
-- Currently placeholder platforms - will be populated as new capabilities are identified
+### Select Entities
+- **Generic Enum Support**: Automatically creates select entities for ANY enum-type capability
+- `thermofloor_mode` - Thermostat mode selection (Heat, Energy Save Heat, Off, Cool)
+- `measure_price_level` - Price level selection (e.g., VERY_CHEAP, CHEAP, NORMAL, EXPENSIVE)
+- `measure_price_info_level` - Price info level selection
+- `price_level` - Price level indicator
+- Any capability with `values` or `options` (enum type) is automatically created as a select entity
+
+**Note**: Enum capabilities are automatically detected and converted to select entities. This ensures support for new device types and capabilities without code changes.
+
+### Number Entities
+- Ready for future capabilities that require numeric input
+- Currently placeholder platform - will be populated as new capabilities are identified
 
 ---
 
