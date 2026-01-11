@@ -101,19 +101,19 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
         # Handle windowcoverings_state, windowcoverings_set, and garagedoor_closed
         if self._has_windowcoverings:
             state_cap = capabilities.get(self._windowcoverings_cap)
-        if not state_cap:
-            return None
-        
-        state = state_cap.get("value")
-        if state is None:
-            return None
-        
-        try:
-            # Convert state (0-1) to percentage (0-100)
+            if not state_cap:
+                return None
+            
+            state = state_cap.get("value")
+            if state is None:
+                return None
+            
+            try:
+                # Convert state (0-1) to percentage (0-100)
                 # Note: windowcoverings_set uses 0-1 range, windowcoverings_state also uses 0-1
-            state_float = float(state)
-            return int(state_float * 100)
-        except (ValueError, TypeError):
+                state_float = float(state)
+                return int(state_float * 100)
+            except (ValueError, TypeError):
                 _LOGGER.warning("Invalid %s value for device %s: %s", self._windowcoverings_cap, self._device_id, state)
                 return None
         elif self._has_garagedoor:
@@ -129,7 +129,7 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
             # Convert boolean to position: True (closed) = 0%, False (open) = 100%
             return 0 if is_closed else 100
         
-            return None
+        return None
 
     @property
     def is_closed(self) -> bool | None:
@@ -195,7 +195,7 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
         elif self._has_garagedoor:
             # Garage doors are binary - convert position to boolean
             # Position > 50% = open (False), <= 50% = closed (True)
-        await self._api.set_capability_value(
+            await self._api.set_capability_value(
                 self._device_id, "garagedoor_closed", position <= 50
         )
         # Immediately refresh this device's state for instant UI feedback
