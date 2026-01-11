@@ -26,39 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-### Added
-
-#### Generic Capability Support
-- **Universal Sensor Support**: Added generic handling for ALL `measure_*` and `meter_*` capabilities, including unknown ones
-  - Previously only handled explicitly mapped capabilities
-  - Now automatically creates sensor entities for any `measure_*` or `meter_*` capability, even if not in our mapping
-  - Supports sub-capabilities of unknown capabilities (e.g., `measure_temperature.bed`, `measure_storage.free`)
-  - Unknown capabilities are created as generic sensors with automatic naming
-- **Universal Binary Sensor Support**: Added generic handling for ALL `alarm_*` capabilities
-  - Automatically creates binary sensor entities for any `alarm_*` capability
-  - Supports unknown alarm types (e.g., `alarm_heat`, `alarm_restarted`)
-  - Supports sub-capabilities of unknown alarms
-
-### Fixed
-
-#### Switch Detection
-- **Sub-Capability Detection**: Fixed switch detection to properly handle sub-capabilities (`onoff.output1`, `onoff.output2`)
-  - Updated `get_device_type` to detect switches with sub-capabilities, not just regular `onoff`
-  - Fixed Shelly and Fibaro device detection to include sub-capabilities
-  - Ensures single and double switches are correctly classified as switches (not sensors)
-- **Syntax Errors**: Fixed indentation errors in `device_info.py` that prevented proper compilation
-
-### Changed
-
-#### Device Classification
-- **Improved Switch Detection**: Enhanced device type detection to properly identify multi-channel switches
-  - Devices with only `onoff.output1` (no regular `onoff`) are now correctly classified as switches
-  - Devices with `onoff.output1` and `onoff.output2` are correctly classified as switches
-  - Works for all brands (Walli, Shelly, Fibaro, etc.), not just specific ones
-
----
-
-## [1.1.4-dev.1] - 2026-01-11
+## [1.1.3] - 2026-01-11
 
 ### Added
 
