@@ -261,25 +261,32 @@ To receive automatic updates for beta and dev releases:
    - Enable **Show beta** (toggle it ON)
    - This allows HACS to check for prerelease versions
 
-2. **Enable Prerelease Updates for This Integration (Optional but Recommended):**
-   - Go to **Settings** → **Devices & Services** → **Entities**
-   - Search for `homey` or `hacs` to find HACS switch entities
-   - Look for a switch entity related to Homey Integration (e.g., `switch.hacs_homey_integration_show_beta`)
-   - Enable the switch to include prereleases in update checks for this specific integration
+2. **Install from the Correct Branch/Tag:**
+   - When installing, make sure to select the correct branch/tag:
+     - For **Stable**: Don't specify a branch (or select `main`)
+     - For **Beta**: Select `beta` branch/tag
+     - For **Dev**: Select `dev` branch/tag
+   - HACS will track the branch/tag you install from and show updates for that specific branch
+
+3. **Verify Branch Tracking:**
+   - After installing, check the integration details in HACS
+   - The "Installed version" should match your branch (e.g., `1.1.4-dev.4` for dev)
+   - The "Available version" should show updates for your branch, not stable
+   - If it shows stable as available when you're on dev/beta, you may need to reinstall from the correct branch
 
 **Important Note on Branch Tracking and Version Selection:**
 - Beta and Dev releases use moving tags (`beta` and `dev`) that always point to the latest commit
 - **When installing from dev/beta branch:**
-  - HACS will show `dev` or `beta` as the version name
-  - These tags are automatically updated when new commits are released
-  - HACS will detect updates when the tag moves to a new commit
-- **To update to the latest dev/beta version:**
-  1. Click **"Need a different version?"** to expand the version selector (if needed)
-  2. Select `dev` for dev branch or `beta` for beta branch
-  3. Click **DOWNLOAD** to install the selected version
-- After selecting `dev` or `beta`, HACS will track that tag and notify you when it's updated
+  - HACS will track the `dev` or `beta` tag you install from
+  - The "Available version" should show the latest dev/beta version, not stable
+  - HACS compares your installed version (e.g., `1.1.4-dev.3`) with the latest version on your branch (e.g., `1.1.4-dev.4`)
+- **If HACS shows stable as "Available version" when you're on dev/beta:**
+  1. Make sure "Show beta" is enabled in HACS Settings
+  2. Try clicking "Redownload" and selecting your branch (`dev` or `beta`) again
+  3. HACS should then track that branch and show branch-specific updates
+  4. You may need to reload HACS data: HACS → Settings → Reload Data
 
-**Note**: The `dev` and `beta` tags are moving tags that always point to the latest commit on their respective branches. This makes it easier for HACS to detect updates - you'll always see the latest version for your branch!
+**Note**: The `dev` and `beta` tags are moving tags that always point to the latest commit on their respective branches. HACS should track the branch/tag you install from and show updates for that branch only, not stable releases.
 
 #### Switching Between Release Channels (Stable/Beta/Dev)
 
