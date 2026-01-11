@@ -9,9 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
----
+### Added
 
-## [1.1.4-dev.2] - 2026-01-11
+#### Multi-Branch Release System
+- **Dev Branch**: Created `dev` branch for development builds using moving `dev` tag
+- **Beta Branch**: Created `beta` branch for pre-release testing using moving `beta` tag
+- **Moving Tags**: Dev and beta branches now use moving tags (`dev` and `beta`) that always point to the latest commit
+- **Branch Switching Documentation**: Added comprehensive guide for switching between Stable/Beta/Dev release channels in HACS
+
+### Changed
+
+#### Documentation
+- **Table of Contents**: Updated to include branch switching instructions
+- **HACS Installation Guide**: Added detailed instructions for switching between release channels
+- **Release System**: Updated documentation to explain moving tag approach for dev/beta branches
+
+---
 
 ### Added
 
