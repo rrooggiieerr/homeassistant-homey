@@ -318,7 +318,7 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
         self._capability_id = capability_id
         self._api = api
 
-        # Handle sub-capabilities (e.g., measure_temperature.inside)
+        # Handle sub-capabilities (e.g., measure_temperature.inside, meter_power.imported)
         base_capability = capability_id.split(".")[0] if "." in capability_id else capability_id
         sensor_config = CAPABILITY_TO_SENSOR.get(base_capability)
         
@@ -326,11 +326,21 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
             # Unknown capability - create generic sensor
             # This is expected behavior - we create sensors for all measure_* and meter_* capabilities
             _LOGGER.debug("Creating generic sensor for unknown capability: %s for device %s", capability_id, device_id)
-            sensor_config = {
-                "device_class": None,
-                "state_class": SensorStateClass.MEASUREMENT,
-                "unit": None,
-            }
+            
+            # Special handling for meter_* sub-capabilities (e.g., meter_power.imported, meter_power.exported)
+            # These should be energy sensors for Energy dashboard compatibility
+            if base_capability == "meter_power":
+                sensor_config = {
+                    "device_class": SensorDeviceClass.ENERGY,
+                    "state_class": SensorStateClass.TOTAL_INCREASING,  # Cumulative energy
+                    "unit": UnitOfEnergy.KILO_WATT_HOUR,
+                }
+            else:
+                sensor_config = {
+                    "device_class": None,
+                    "state_class": SensorStateClass.MEASUREMENT,
+                    "unit": None,
+                }
         
         # Generate entity name - handle sub-capabilities
         if "." in capability_id:
@@ -362,6 +372,15 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
                 # Convert currency symbol to currency code + /kWh format for Energy dashboard
                 unit_normalized = self._normalize_price_unit(unit_from_capability)
                 self._attr_native_unit_of_measurement = unit_normalized
+            elif self._attr_device_class == SensorDeviceClass.ENERGY and base_capability == "meter_power":
+                # For energy sensors (meter_power.*), ensure unit is kWh for Energy dashboard compatibility
+                # If unit is already kWh or similar, use it; otherwise default to kWh
+                unit_lower = unit_from_capability.lower()
+                if "kwh" in unit_lower or "wh" in unit_lower:
+                    self._attr_native_unit_of_measurement = unit_from_capability
+                else:
+                    # Default to kWh for Energy dashboard compatibility
+                    self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
             else:
                 self._attr_native_unit_of_measurement = unit_from_capability
         else:
