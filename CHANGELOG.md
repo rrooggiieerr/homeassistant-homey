@@ -9,6 +9,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### Energy Dashboard Support
+- **Energy Sensor Compatibility**: Ensured all energy sensors (`meter_power`, `meter_power.imported`, `meter_power.exported`) are compatible with Home Assistant Energy dashboard
+  - Energy sensors now have proper `device_class: energy` and `state_class: total_increasing`
+  - All energy sensors use kWh units for Energy dashboard compatibility
+  - Supports individual device energy tracking in Energy dashboard
+- **Price Sensor Unit Normalization**: Added automatic currency unit normalization for Tibber price sensors
+  - Converts currency symbols (¤, €, $) to currency codes (SEK, EUR, USD) + /kWh format
+  - Fixes "Unexpected unit of measurement" warning for Tibber price sensors
+  - Supports `measure_price_total`, `measure_price_lowest`, `measure_price_highest` sensors
+- **Accumulated Cost Currency Detection**: Added automatic currency detection for `accumulatedCost` sensor
+  - Auto-detects currency from price sensors on the same device (e.g., "SEK/kWh" → "SEK")
+  - Only normalizes specific currency symbols (€, $, £, etc.), not generic "¤"
+  - Leaves unit empty if currency cannot be detected, allowing user customization
+
+#### Custom Thermostat Support
+- **Custom Mode Capabilities**: Added support for custom thermostat mode capabilities (e.g., `thermofloor_mode`)
+  - Automatically detects enum capabilities ending with `_mode` (not just `thermostat_mode`)
+  - Maps custom mode values (Heat, Energy Save Heat, Off, Cool) to HVAC modes
+  - Supports ThermoFloor and other custom thermostat implementations
+- **Thermostat Binary Sensors**: Added support for thermostat-specific binary sensors
+  - `thermofloor_onoff` binary sensor for heating active/idle state
+  - Read-only status indicators are properly distinguished from controls
+
+#### Select Entity Enhancements
+- **Generic Enum Detection**: Added automatic detection and creation of select entities for all enum-type capabilities
+  - Creates select entities for any capability with `values` or `options` (enum type)
+  - Supports enum values as objects (`{"id": "VERY_CHEAP", "title": "VERY_CHEAP"}`) or simple strings
+  - Handles Tibber price level sensors (`measure_price_level`, `measure_price_info_level`, `price_level`)
+
+### Fixed
+
+#### Climate Entity Controls
+- **Turn On/Off Support**: Added `turn_on` and `turn_off` support for climate entities
+  - Only uses settable on/off capabilities for control (checks `setable: true`)
+  - Supports turn_on/turn_off via HVAC mode changes for devices without settable on/off
+  - Fixes error: "Entity climate.golvvarme does not support action climate.turn_on"
+  - ThermoFloor uses `thermofloor_mode` for control (turn_on sets to Heat, turn_off sets to Off)
+- **Read-Only Status Indicators**: Fixed handling of read-only on/off capabilities
+  - `thermofloor_onoff` is correctly identified as read-only (status indicator)
+  - Read-only capabilities are not used for control, only for status display
+
+#### Sensor Warnings
+- **Reduced Log Noise**: Changed expected warnings to DEBUG level
+  - "Unknown sensor capability" warnings changed to DEBUG (generic sensor creation is expected)
+  - "light_hue without light_saturation" warning changed to DEBUG (expected for some devices)
+
+#### Flow Trigger Service
+- **Entity Selector**: Added `EntitySelector` to `homey.trigger_flow` service
+  - Home Assistant now displays a dropdown of available Homey flow button entities
+  - Improved error messages with usage examples
+  - Extracts `flow_id` from `entity_id`'s `unique_id` automatically
+
+### Changed
+
+#### Currency Handling
+- **No Default Currency**: Removed SEK default for generic currency symbol (¤)
+  - If currency cannot be detected from price sensors, unit is left empty
+  - Users can customize the unit in Home Assistant if needed
+  - Prevents incorrect currency assumptions
+
+#### Energy Sensors
+- **Sub-Capability Support**: Enhanced energy sensor support for sub-capabilities
+  - `meter_power.imported` and `meter_power.exported` now have proper energy device class
+  - All `meter_power.*` sub-capabilities use kWh units for Energy dashboard compatibility
+
 ---
 
 ## [1.1.4-dev.2] - 2026-01-11
