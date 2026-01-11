@@ -250,13 +250,46 @@ When a new version is available:
 
 **Note**: HACS will automatically check for updates and notify you when new versions are available.
 
+#### Enabling Automatic Updates for Beta/Dev Releases
+
+To receive automatic updates for beta and dev releases:
+
+1. **Enable "Show Beta" in HACS:**
+   - Open **HACS** in Home Assistant
+   - Click the three dots menu (⋮) in the top-right corner
+   - Select **Settings**
+   - Enable **Show beta** (toggle it ON)
+   - This allows HACS to check for prerelease versions
+
+2. **Enable Prerelease Updates for This Integration (Optional but Recommended):**
+   - Go to **Settings** → **Devices & Services** → **Entities**
+   - Search for `homey` or `hacs` to find HACS switch entities
+   - Look for a switch entity related to Homey Integration (e.g., `switch.hacs_homey_integration_show_beta`)
+   - Enable the switch to include prereleases in update checks for this specific integration
+
+**Important Note on Branch Tracking and Version Selection:**
+- Beta and Dev releases use moving tags (`beta` and `dev`) that always point to the latest commit
+- **When installing from dev/beta branch:**
+  - HACS will show `dev` or `beta` as the version name
+  - These tags are automatically updated when new commits are released
+  - HACS will detect updates when the tag moves to a new commit
+- **To update to the latest dev/beta version:**
+  1. Click **"Need a different version?"** to expand the version selector (if needed)
+  2. Select `dev` for dev branch or `beta` for beta branch
+  3. Click **DOWNLOAD** to install the selected version
+- After selecting `dev` or `beta`, HACS will track that tag and notify you when it's updated
+
+**Note**: The `dev` and `beta` tags are moving tags that always point to the latest commit on their respective branches. This makes it easier for HACS to detect updates - you'll always see the latest version for your branch!
+
 #### Switching Between Release Channels (Stable/Beta/Dev)
 
 This integration offers three release channels:
 
-- **Stable** (main branch): Production-ready releases (e.g., `1.1.3`)
-- **Beta** (beta branch): Pre-release testing versions (e.g., `1.1.4-beta.1`)
-- **Dev** (dev branch): Latest development builds (e.g., `1.1.4-dev.1`)
+- **Stable** (main branch): Production-ready releases with semantic versioning (e.g., `v1.1.3`)
+- **Beta** (beta branch): Pre-release testing - uses `beta` tag that tracks latest commit
+- **Dev** (dev branch): Latest development builds - uses `dev` tag that tracks latest commit
+
+**Note**: Beta and Dev releases use moving tags (`beta` and `dev`) that always point to the latest commit on their respective branches. This makes it easier for HACS to detect updates - you'll always see the latest version for your branch!
 
 **To switch to Beta or Dev:**
 
@@ -281,6 +314,12 @@ This integration offers three release channels:
    - The version number will show which branch you're on (e.g., `1.1.4-beta.1` or `1.1.4-dev.1`)
 
 4. **Restart Home Assistant**
+
+5. **Enable Automatic Updates (Important!):**
+   - After installing from beta or dev branch, enable **"Show beta"** in HACS Settings
+   - Go to **HACS** → Three dots menu (⋮) → **Settings** → Enable **Show beta**
+   - This ensures HACS will automatically detect and notify you of new beta/dev releases
+   - Updates will appear automatically when available - no manual refresh needed!
 
 **Note**: When switching branches, your configuration and devices are preserved. You can switch back to Stable at any time by removing and reinstalling without specifying a branch.
 

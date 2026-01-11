@@ -211,25 +211,48 @@ async def async_setup_entry(
 
     for device_id, device in devices.items():
         capabilities = device.get("capabilitiesObj", {})
+        
+        # First, handle explicitly mapped capabilities
         for capability_id in CAPABILITY_TO_SENSOR:
             if capability_id in capabilities:
                 entities.append(
                     HomeySensor(coordinator, device_id, device, capability_id, api, zones)
                 )
         
-        # Also handle sub-capabilities (capabilities with dots, e.g., measure_temperature.inside)
+        # Then, handle ALL measure_* and meter_* capabilities generically (including unknown ones)
+        # This ensures we support new device types and capabilities automatically
         # Reference: https://apps.developer.homey.app/the-basics/devices/capabilities#sub-capabilities-using-the-same-capability-more-than-once
-        # BUT exclude internal Homey maintenance buttons (migration, reset, identify, etc.)
         for capability_id in capabilities:
-            # Check if this is a sub-capability of a known sensor capability
-            if "." in capability_id:
-                base_capability = capability_id.split(".")[0]
-                if base_capability in CAPABILITY_TO_SENSOR:
-                    # Skip internal Homey maintenance buttons (same logic as button.py)
-                    capability_lower = capability_id.lower()
-                    if any(keyword in capability_lower for keyword in ["migrate", "reset", "identify"]):
-                        _LOGGER.debug("Skipping internal Homey maintenance capability: %s", capability_id)
-                        continue
+            # Skip if already handled above
+            if capability_id in CAPABILITY_TO_SENSOR:
+                continue
+            
+            # Check if this is a measure_* or meter_* capability (including sub-capabilities)
+            is_measure = capability_id.startswith("measure_")
+            is_meter = capability_id.startswith("meter_")
+            
+            if is_measure or is_meter:
+                # Skip internal Homey maintenance buttons (same logic as button.py)
+                capability_lower = capability_id.lower()
+                if any(keyword in capability_lower for keyword in ["migrate", "reset", "identify"]):
+                    _LOGGER.debug("Skipping internal Homey maintenance capability: %s", capability_id)
+                    continue
+                
+                # Check if it's a sub-capability of a known capability
+                if "." in capability_id:
+                    base_capability = capability_id.split(".")[0]
+                    # If base is known, use its config; otherwise create generic sensor
+                    if base_capability in CAPABILITY_TO_SENSOR:
+                        entities.append(
+                            HomeySensor(coordinator, device_id, device, capability_id, api, zones)
+                        )
+                    else:
+                        # Unknown base capability - create generic sensor
+                        entities.append(
+                            HomeySensor(coordinator, device_id, device, capability_id, api, zones)
+                        )
+                else:
+                    # Unknown top-level capability - create generic sensor
                     entities.append(
                         HomeySensor(coordinator, device_id, device, capability_id, api, zones)
                     )

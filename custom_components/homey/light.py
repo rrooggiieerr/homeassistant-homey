@@ -333,7 +333,7 @@ class HomeyLight(CoordinatorEntity, LightEntity):
                 return kelvin
             else:
                 # Already in Kelvin
-                return int(temp)
+            return int(temp)
         return None
 
     async def async_turn_on(self, **kwargs: Any) -> None:
