@@ -74,6 +74,23 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
         if "target_humidity" in capabilities:
             supported_features |= ClimateEntityFeature.TARGET_HUMIDITY
         
+        # Check for on/off capabilities (onoff, thermofloor_onoff, etc.)
+        # Store which on/off capability to use
+        self._onoff_capability = None
+        if "onoff" in capabilities:
+            self._onoff_capability = "onoff"
+            supported_features |= ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF
+        elif "thermofloor_onoff" in capabilities:
+            self._onoff_capability = "thermofloor_onoff"
+            supported_features |= ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF
+        else:
+            # Check for any *_onoff capability
+            for cap_id in capabilities:
+                if cap_id.endswith("_onoff") and capabilities[cap_id].get("type") == "boolean":
+                    self._onoff_capability = cap_id
+                    supported_features |= ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF
+                    break
+        
         self._attr_supported_features = supported_features
         hvac_modes = []
         
@@ -428,6 +445,29 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
             return HVACMode.OFF if not is_on else HVACMode.HEAT_COOL
         
         return self._attr_hvac_mode
+
+    async def async_turn_on(self) -> None:
+        """Turn the climate device on."""
+        if hasattr(self, "_onoff_capability") and self._onoff_capability:
+            await self._api.set_capability_value(self._device_id, self._onoff_capability, True)
+            await self.coordinator.async_refresh_device(self._device_id)
+        else:
+            # Fallback: set HVAC mode to first non-OFF mode
+            if self._attr_hvac_modes:
+                for mode in self._attr_hvac_modes:
+                    if mode != HVACMode.OFF:
+                        await self.async_set_hvac_mode(mode)
+                        return
+
+    async def async_turn_off(self) -> None:
+        """Turn the climate device off."""
+        if hasattr(self, "_onoff_capability") and self._onoff_capability:
+            await self._api.set_capability_value(self._device_id, self._onoff_capability, False)
+            await self.coordinator.async_refresh_device(self._device_id)
+        else:
+            # Fallback: set HVAC mode to OFF
+            if HVACMode.OFF in self._attr_hvac_modes:
+                await self.async_set_hvac_mode(HVACMode.OFF)
 
     async def async_set_humidity(self, humidity: int) -> None:
         """Set new target humidity."""
