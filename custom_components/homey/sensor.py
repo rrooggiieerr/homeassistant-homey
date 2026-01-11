@@ -365,12 +365,18 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
         
         # Check if this is a price sensor that needs energy price format (currency/kWh)
         is_price_sensor = capability_id in ["measure_price_total", "measure_price_lowest", "measure_price_highest"]
+        # Check if this is an accumulated cost sensor that needs currency code (not symbol)
+        is_accumulated_cost = capability_id == "accumulatedCost"
         
         # Use unit from capability data if available, otherwise use configured unit
         if unit_from_capability:
             if is_price_sensor:
                 # Convert currency symbol to currency code + /kWh format for Energy dashboard
                 unit_normalized = self._normalize_price_unit(unit_from_capability)
+                self._attr_native_unit_of_measurement = unit_normalized
+            elif is_accumulated_cost:
+                # Convert currency symbol to currency code for accumulated cost (e.g., "¤" -> "SEK")
+                unit_normalized = self._normalize_currency_unit(unit_from_capability)
                 self._attr_native_unit_of_measurement = unit_normalized
             elif self._attr_device_class == SensorDeviceClass.ENERGY and base_capability == "meter_power":
                 # For energy sensors (meter_power.*), ensure unit is kWh for Energy dashboard compatibility
@@ -430,6 +436,76 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
         
         # Append /kWh for Energy dashboard compatibility
         return f"{currency_code}/kWh"
+    
+    def _normalize_currency_unit(self, unit: str) -> str:
+        """Normalize currency units by converting symbols to currency codes.
+        
+        Converts currency symbols to currency codes for better display in Home Assistant.
+        Examples:
+        - "¤" -> "SEK" (generic currency symbol, default to SEK)
+        - "€" -> "EUR"
+        - "$" -> "USD"
+        - "kr" -> "SEK" (Swedish/Norwegian/Danish krone)
+        - "SEK" -> "SEK" (already a code)
+        
+        Args:
+            unit: Currency unit string from Homey (symbol or code)
+            
+        Returns:
+            Currency code (e.g., "SEK", "EUR", "USD")
+        """
+        if not unit:
+            return "SEK"  # Default fallback
+        
+        unit = unit.strip()
+        
+        # Map currency symbols to currency codes
+        currency_map = {
+            "¤": "SEK",  # Generic currency symbol - default to SEK (common for Tibber users)
+            "€": "EUR",
+            "$": "USD",
+            "£": "GBP",
+            "¥": "JPY",
+            "kr": "SEK",  # Swedish/Norwegian/Danish krone
+            "SEK": "SEK",
+            "EUR": "EUR",
+            "USD": "USD",
+            "GBP": "GBP",
+            "JPY": "JPY",
+            "CHF": "CHF",
+            "CAD": "CAD",
+            "AUD": "AUD",
+            "NZD": "NZD",
+            "DKK": "DKK",  # Danish krone
+            "NOK": "NOK",  # Norwegian krone
+            "PLN": "PLN",  # Polish zloty
+            "CZK": "CZK",  # Czech koruna
+            "HUF": "HUF",  # Hungarian forint
+            "RUB": "RUB",  # Russian ruble
+            "TRY": "TRY",  # Turkish lira
+            "BRL": "BRL",  # Brazilian real
+            "MXN": "MXN",  # Mexican peso
+            "ZAR": "ZAR",  # South African rand
+            "INR": "INR",  # Indian rupee
+            "CNY": "CNY",  # Chinese yuan
+        }
+        
+        # Check if the unit is a known currency symbol or code
+        if unit in currency_map:
+            return currency_map[unit]
+        
+        # If it's already a 3-letter uppercase code, assume it's valid
+        if len(unit) == 3 and unit.isalpha() and unit.isupper():
+            return unit
+        
+        # Fallback: try case-insensitive match
+        unit_upper = unit.upper()
+        for symbol, code in currency_map.items():
+            if symbol.upper() == unit_upper:
+                return code
+        
+        # Final fallback - return as-is if we can't determine
+        return unit
 
     @property
     def native_value(self) -> float | None:
