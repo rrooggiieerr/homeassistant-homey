@@ -44,16 +44,35 @@ async def async_setup_entry(
 
     for device_id, device in devices.items():
         capabilities = device.get("capabilitiesObj", {})
-        # Check for capabilities that should be select entities
-        # For now, this is a placeholder - add specific capabilities as needed
+        
+        # First, check explicitly listed select capabilities
         for capability_id in SELECT_CAPABILITIES:
             if capability_id in capabilities:
                 cap_data = capabilities[capability_id]
-                # Check if capability has options
-                if "values" in cap_data or "options" in cap_data:
+                # Check if capability has options/values (enum type)
+                if "values" in cap_data or "options" in cap_data or cap_data.get("type") == "enum":
                     entities.append(
                         HomeySelect(coordinator, device_id, device, capability_id, cap_data, api, zones)
                     )
+        
+        # Then, handle ALL enum-type capabilities generically (including unknown ones)
+        # This ensures we support new enum capabilities automatically
+        for capability_id, cap_data in capabilities.items():
+            # Skip if already handled above
+            if capability_id in SELECT_CAPABILITIES:
+                continue
+            
+            # Check if this is an enum-type capability
+            if cap_data.get("type") == "enum" and ("values" in cap_data or "options" in cap_data):
+                # Skip internal Homey maintenance buttons
+                capability_lower = capability_id.lower()
+                if any(keyword in capability_lower for keyword in ["migrate", "reset", "identify"]):
+                    _LOGGER.debug("Skipping internal Homey maintenance enum capability: %s", capability_id)
+                    continue
+                
+                entities.append(
+                    HomeySelect(coordinator, device_id, device, capability_id, cap_data, api, zones)
+                )
 
     async_add_entities(entities)
 
@@ -84,9 +103,16 @@ class HomeySelect(CoordinatorEntity, SelectEntity):
         self._attr_unique_id = f"homey_{device_id}_{capability_id}"
         
         # Get options from capability data
+        # Enum capabilities have "values" array with objects like {"id": "VERY_CHEAP", "title": "VERY_CHEAP"}
+        # or simple string arrays
         options = capability_data.get("values") or capability_data.get("options", [])
         if isinstance(options, list):
-            self._attr_options = [str(opt) for opt in options]
+            if len(options) > 0 and isinstance(options[0], dict):
+                # Extract IDs from enum value objects
+                self._attr_options = [str(opt.get("id", opt.get("title", opt))) for opt in options]
+            else:
+                # Simple string array
+                self._attr_options = [str(opt) for opt in options]
         elif isinstance(options, dict):
             # If it's a dict, use the keys or values
             self._attr_options = [str(opt) for opt in options.keys()]
@@ -102,6 +128,10 @@ class HomeySelect(CoordinatorEntity, SelectEntity):
         capabilities = device_data.get("capabilitiesObj", {})
         value = capabilities.get(self._capability_id, {}).get("value")
         if value is not None:
+            # For enum types, value might be a string (the ID) or an object
+            if isinstance(value, dict):
+                # If it's an object, extract the ID
+                return str(value.get("id", value.get("title", value)))
             return str(value)
         return None
 

@@ -214,6 +214,12 @@ CAPABILITY_TO_SENSOR = {
         "state_class": SensorStateClass.MEASUREMENT,
         "unit": None,  # Will be set from capability data (e.g., SEK/kWh)
     },
+    # Tibber cost/energy sensors
+    "accumulatedCost": {
+        "device_class": None,  # Accumulated cost
+        "state_class": SensorStateClass.TOTAL_INCREASING,  # Cumulative cost
+        "unit": None,  # Will be set from capability data (e.g., SEK, ¤)
+    },
 }
 
 
@@ -253,11 +259,18 @@ async def async_setup_entry(
             if capability_id in CAPABILITY_TO_SENSOR:
                 continue
             
+            # Skip enum-type capabilities - they should be select entities, not sensors
+            cap_data = capabilities.get(capability_id, {})
+            if cap_data.get("type") == "enum":
+                _LOGGER.debug("Skipping enum capability %s - should be handled by select platform", capability_id)
+                continue
+            
             # Check if this is a measure_* or meter_* capability (including sub-capabilities)
             is_measure = capability_id.startswith("measure_")
             is_meter = capability_id.startswith("meter_")
+            is_accumulated_cost = capability_id == "accumulatedCost"
             
-            if is_measure or is_meter:
+            if is_measure or is_meter or is_accumulated_cost:
                 # Skip internal Homey maintenance buttons (same logic as button.py)
                 capability_lower = capability_id.lower()
                 if any(keyword in capability_lower for keyword in ["migrate", "reset", "identify"]):
