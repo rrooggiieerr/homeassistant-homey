@@ -66,7 +66,7 @@ def get_device_type(capabilities: dict[str, Any], driver_uri: str | None = None,
             # Don't override if we have more specific capabilities
             if mapped_type == "switch" and any(cap in caps for cap in ["dim", "light_hue", "light_temperature"]):
                 # Device class says "socket" but has light capabilities - treat as light
-        return "light"
+                return "light"
             return mapped_type
         # Unknown device class - log for debugging but continue with capability-based detection
         _LOGGER.debug("Unknown device class '%s' - using capability-based detection", device_class)
