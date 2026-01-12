@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.4-dev.15] - 2026-01-12
+
+### Fixed
+- **Enum-Based Windowcoverings API Validation**: Fixed API validation to accept enum string values ("up", "idle", "down") for `windowcoverings_state`
+  - Previously, the API validation rejected enum strings because it expected numeric values
+  - Now correctly handles both enum-based and numeric `windowcoverings_state` capabilities
+  - Enum-based covers can now be controlled properly (open/close/stop actions work)
+  - Numeric windowcoverings_state devices continue to work as before
+  - Fixes error: "Invalid numeric value for capability windowcoverings_state: up (appears to be a string, not a number)"
+
 ## [1.1.4-dev.14] - 2026-01-12
 
 ### Fixed
