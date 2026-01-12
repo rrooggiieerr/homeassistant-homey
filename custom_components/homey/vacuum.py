@@ -5,13 +5,8 @@ import logging
 from typing import Any
 
 from homeassistant.components.vacuum import (
-    STATE_CLEANING,
-    STATE_DOCKED,
-    STATE_ERROR,
-    STATE_IDLE,
-    STATE_PAUSED,
-    STATE_RETURNING,
-    VacuumEntity,
+    StateVacuumEntity,
+    VacuumActivity,
     VacuumEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -59,7 +54,7 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class HomeyVacuum(CoordinatorEntity, VacuumEntity):
+class HomeyVacuum(CoordinatorEntity, StateVacuumEntity):
     """Representation of a Homey vacuum cleaner."""
 
     def __init__(
@@ -99,41 +94,41 @@ class HomeyVacuum(CoordinatorEntity, VacuumEntity):
         self._attr_device_info = get_device_info(device_id, device, zones)
 
     @property
-    def state(self) -> str:
-        """Return the state of the vacuum."""
+    def activity(self) -> VacuumActivity | None:
+        """Return the activity of the vacuum."""
         device_data = self.coordinator.data.get(self._device_id, self._device)
         capabilities = device_data.get("capabilitiesObj", {})
         
         # Check for error states first
         if capabilities.get("alarm_problem", {}).get("value"):
-            return STATE_ERROR
+            return VacuumActivity.ERROR
         if capabilities.get("alarm_stuck", {}).get("value"):
-            return STATE_ERROR
+            return VacuumActivity.ERROR
         if capabilities.get("alarm_battery", {}).get("value"):
-            return STATE_ERROR
+            return VacuumActivity.ERROR
         
         # Check if docked
         docked = capabilities.get("dock", {}).get("value")
         if docked is True:
-            return STATE_DOCKED
+            return VacuumActivity.DOCKED
         
         # Check if cleaning
         is_cleaning = capabilities.get("is_cleaning", {}).get("value")
         if is_cleaning is True:
-            return STATE_CLEANING
+            return VacuumActivity.CLEANING
         
         # Check if paused (pause_clean is True means paused)
         pause_clean = capabilities.get("pause_clean", {}).get("value")
         if pause_clean is True:
-            return STATE_PAUSED
+            return VacuumActivity.PAUSED
         
         # Check battery charging state to determine if returning
         charging_state = capabilities.get("battery_charging_state", {}).get("value")
         if charging_state == "charging" and docked is False:
-            return STATE_RETURNING
+            return VacuumActivity.RETURNING
         
         # Default to idle
-        return STATE_IDLE
+        return VacuumActivity.IDLE
 
     @property
     def battery_level(self) -> int | None:

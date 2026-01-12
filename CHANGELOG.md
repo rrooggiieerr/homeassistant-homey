@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.4-dev.14] - 2026-01-12
+
+### Fixed
+- **Vacuum Entity Compatibility**: Fixed vacuum entity to work with Home Assistant 2026.1
+  - Changed from deprecated `VacuumEntity` to `StateVacuumEntity`
+  - Replaced deprecated `STATE_*` constants with `VacuumActivity` enum
+  - Changed `state` property to `activity` property (required in HA 2026.1+)
+  - Resolves ImportError and deprecation warnings
+
 ## [1.1.4-dev.13] - 2026-01-12
 
 ### Fixed
