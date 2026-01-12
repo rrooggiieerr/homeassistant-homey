@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.4-dev.12] - 2026-01-11
+
+### Fixed
+- **Cover Position Feature Flag**: Fixed `AttributeError` for `CoverEntityFeature.SET_COVER_POSITION`
+  - Changed to correct attribute name: `CoverEntityFeature.POSITION`
+  - Only adds POSITION feature for devices that support numeric position (0-1 range)
+- **Enum-Based Windowcoverings Support**: Added support for enum-based `windowcoverings_state` capabilities
+  - Detects enum-based covers (with values like "up", "idle", "down") vs numeric covers
+  - Maps enum states to positions: "up" = 100%, "down" = 0%, "idle" = 50%
+  - Open/close/stop methods use appropriate enum values for enum-based covers
+  - Position setting only available for numeric covers, not enum-based covers
+
 ### Added
 
 #### Energy Dashboard Support
