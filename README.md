@@ -4,7 +4,7 @@
 [![GitHub issues](https://img.shields.io/github/issues/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/issues)
 [![GitHub stars](https://img.shields.io/github/stars/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/stargazers)
 
-**Version**: 1.1.5 | **Last Updated**: 2026-01-12 | [Changelog](CHANGELOG.md)
+**Version**: 1.1.5-beta.1 | **Last Updated**: 2026-01-12 | [Changelog](CHANGELOG.md)
 
 A Homey integration for Home Assistant that automatically discovers and connects all your Homey devices, making them available natively in Home Assistant.
 
@@ -105,6 +105,14 @@ This Homey integration brings your [Homey](https://homey.app) hub into Home Assi
 ---
 
 ## Prerequisites
+
+:warning: **Quick heads-up for the older Homey gang**: If you're on Homey (Pro) Early 2016–2019 (aka "no Local API club"), this integration won't work.
+
+The good news: you can still bridge Homey ↔ Home Assistant using the universal MQTT approach.
+
+**How-to**: https://community.homey.app/t/tutorial-pro-how-to-integrate-home-assistant-with-homey-pro-and-v-v/92641
+
+---
 
 Before installing the integration, you need to create an API Key in Homey:
 
