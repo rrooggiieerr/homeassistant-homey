@@ -11,9 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.1.5] - 2026-01-12
 
-### 🎉 Major Release: Vacuum Support, New Device Types, and Home Assistant 2026.1 Compatibility
+### 🎉 Major Release: Comprehensive Device Support Expansion and Home Assistant 2026.1 Compatibility
 
-**This version adds comprehensive support for vacuum cleaners, battery devices, lawn mowers, heat pumps, and solar panels. It also includes critical fixes for Home Assistant 2026.1 compatibility, improved light detection, sensor labeling, cover operation, and reduced logging noise.**
+**This is a significant release that dramatically expands device support and platform capabilities. Highlights include:**
+
+- **New Device Types**: Full support for vacuum cleaners, battery storage systems, lawn mowers, heat pumps, and solar panels
+- **Universal Capability Detection**: Automatic detection and support for ALL `measure_*`, `meter_*`, and `alarm_*` capabilities, even unknown ones
+- **Energy Dashboard Integration**: Complete compatibility with Home Assistant's Energy dashboard, including proper currency normalization for Tibber and other price sensors
+- **Enhanced Platform Support**: New number entity platform, generic boolean binary sensors, and automatic enum select entity creation
+- **Custom Thermostat Support**: Full support for custom thermostat implementations like ThermoFloor with mode-based control
+- **Home Assistant 2026.1 Compatibility**: Critical updates for vacuum entities using new `StateVacuumEntity` and `VacuumActivity` enum
+- **Device Classification Improvements**: Fixed light detection for socket-class devices, improved switch detection for multi-channel devices, and enhanced cover operation with enum-based windowcoverings support
+- **User Experience Enhancements**: Fixed area assignment preservation, added flow trigger service with entity selector dropdown, and significantly reduced logging noise
 
 ### Added
 
