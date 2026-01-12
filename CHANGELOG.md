@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.4-dev.16] - 2026-01-12
+
+### Added
+- **Devicegroups Plugin Support**: Full support for Homey devicegroups plugin groups
+  - Groups are now detected and handled correctly regardless of their class type
+  - Groups with `class: "light"` create light entities (even with minimal capabilities)
+  - Groups with `class: "fan"` create fan entities (even without `fan_speed`)
+  - Groups with `class: "socket"` or `"switch"` create switch entities
+  - Groups with `class: "heater"` or `"thermostat"` create climate entities (even without `target_temperature`)
+  - Groups with cover-related classes (`windowcoverings`, `cover`, `curtain`, etc.) create cover entities
+  - Groups are identified by `driverId` pattern: `homey:app:com.swttt.devicegroups:*`
+  - Added comprehensive debug logging to help identify when groups are detected
+  - Groups work with any class type and are handled based on their capabilities and class
+
 ## [1.1.4-dev.15] - 2026-01-12
 
 ### Fixed

@@ -37,10 +37,44 @@ async def async_setup_entry(
 
     for device_id, device in devices.items():
         capabilities = device.get("capabilitiesObj", {})
-        # Only create fan entities for devices with fan_speed capability
-        # Devices with just onoff should be switches, not fans
-        if "fan_speed" in capabilities:
+        driver_id = device.get("driverId", "")
+        device_name = device.get("name", "Unknown")
+        device_class = device.get("class", "")
+        
+        # Check if this is a devicegroups group
+        is_devicegroups_group = driver_id.startswith("homey:app:com.swttt.devicegroups:")
+        if is_devicegroups_group:
+            _LOGGER.debug(
+                "Found devicegroups group in fan platform: %s (id: %s, class: %s, driverId: %s, capabilities: %s)",
+                device_name,
+                device_id,
+                device_class,
+                driver_id,
+                list(capabilities.keys())
+            )
+        
+        # Special handling for devicegroups groups: respect their class
+        # If a group has class "fan", treat it as a fan even if capabilities are minimal
+        is_devicegroups_fan = (
+            is_devicegroups_group 
+            and device_class == "fan" 
+            and "onoff" in capabilities  # At minimum, fans should have onoff
+        )
+        
+        # Create fan entity if:
+        # 1. Has fan_speed capability (standard detection)
+        # 2. OR is a devicegroups group with class "fan" (respect group class)
+        # Note: Groups with class "fan" but no fan_speed will still create a fan entity
+        # The entity will handle missing capabilities gracefully
+        if "fan_speed" in capabilities or is_devicegroups_fan:
             entities.append(HomeyFan(coordinator, device_id, device, api, zones))
+            if is_devicegroups_group:
+                _LOGGER.info(
+                    "Created fan entity for devicegroups group: %s (id: %s, has_fan_speed=%s)",
+                    device_name,
+                    device_id,
+                    "fan_speed" in capabilities
+                )
 
     async_add_entities(entities)
 

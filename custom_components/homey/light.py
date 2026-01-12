@@ -50,7 +50,21 @@ async def async_setup_entry(
     for device_id, device in devices.items():
         capabilities = device.get("capabilitiesObj", {})
         driver_uri = device.get("driverUri", "").lower()
+        driver_id = device.get("driverId", "")
         device_name = device.get("name", "Unknown")
+        device_class = device.get("class", "")
+        
+        # Check if this is a devicegroups group
+        is_devicegroups_group = driver_id.startswith("homey:app:com.swttt.devicegroups:")
+        if is_devicegroups_group:
+            _LOGGER.debug(
+                "Found devicegroups group in light platform: %s (id: %s, class: %s, driverId: %s, capabilities: %s)",
+                device_name,
+                device_id,
+                device_class,
+                driver_id,
+                list(capabilities.keys())
+            )
         
         # Check if device has light-related capabilities
         # A device is a light if it has onoff AND at least one of: dim, light_hue, light_temperature
@@ -94,17 +108,31 @@ async def async_setup_entry(
                     device_id, device_name, device.get("driverUri", "unknown"), has_dim
                 )
         
+        # Special handling for devicegroups groups: respect their class
+        # If a group has class "light", treat it as a light even if capabilities are minimal
+        is_devicegroups_light = (
+            is_devicegroups_group 
+            and device_class == "light" 
+            and has_onoff
+        )
+        
         # Create light entity if:
         # 1. Has onoff AND (dim OR hue OR temp) - standard light detection
         #    This catches devices with class "socket" that have light capabilities (e.g., Philips Hue)
         # 2. OR is a known light device type (device-specific detection)
         # 3. OR is a generic dimmable device (onoff + dim, regardless of class)
+        # 4. OR is a devicegroups group with class "light" (respect group class)
         # Note: Even if capabilities aren't fully exposed, we create the light entity
         # and let the entity class determine supported features based on available capabilities
         # 
         # IMPORTANT: Devices with class "socket" but having dim/color capabilities should be lights, not switches
         # The switch platform will skip them if has_light_capabilities is True
-        is_light = (has_onoff and (has_dim or has_hue or has_temp)) or is_known_light_device or is_generic_dimmable
+        is_light = (
+            (has_onoff and (has_dim or has_hue or has_temp)) 
+            or is_known_light_device 
+            or is_generic_dimmable
+            or is_devicegroups_light
+        )
         
         if is_light:
             # Log capabilities for debugging
