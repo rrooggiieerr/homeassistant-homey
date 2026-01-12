@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.4-dev.17] - 2026-01-12
+
+### Fixed
+- **Indentation Errors**: Fixed multiple indentation errors in `device_info.py` that prevented the integration from loading
+  - Fixed `return "light"` statement indentation (line 69)
+  - Fixed Philips Hue detection `if` statement indentation (line 127)
+  - Fixed Shelly detection `return "switch"` statement indentation (line 143)
+  - Resolves `IndentationError: expected an indented block after 'if' statement`
+
 ## [1.1.4-dev.16] - 2026-01-12
 
 ### Added
