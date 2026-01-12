@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.5-beta.1] - 2026-01-12
+
+### Fixed
+- **Self-Hosted Server SSL Support**: Fixed SSL handling for Homey Self-Hosted Server users
+  - Previously, the integration always disabled SSL (`ssl=False`), causing HTTPS connections to fail
+  - Now properly detects HTTPS URLs and creates appropriate SSL context
+  - SSL certificate verification is disabled for self-signed certificates (common on self-hosted servers)
+  - HTTP connections (local Homey devices) continue to work as before
+  - Users can now use `https://` URLs for self-hosted servers without connection errors
+  - Port numbers in URLs are preserved (e.g., `https://homey.example.com:8443`)
+- **Indentation Errors**: Fixed multiple indentation errors in `device_info.py` that prevented the integration from loading
+  - Fixed `return "light"` statement indentation (line 69)
+  - Fixed Philips Hue detection `if` statement indentation (line 127)
+  - Fixed Shelly detection `return "switch"` statement indentation (line 143)
+  - Resolves `IndentationError: expected an indented block after 'if' statement`
+
+### Added
+- **Devicegroups Plugin Support**: Full support for Homey devicegroups plugin groups
+  - Groups are now detected and handled correctly regardless of their class type
+  - Groups with `class: "light"` create light entities (even with minimal capabilities)
+  - Groups with `class: "fan"` create fan entities (even without `fan_speed`)
+  - Groups with `class: "socket"` or `"switch"` create switch entities
+  - Groups with `class: "heater"` or `"thermostat"` create climate entities (even without `target_temperature`)
+  - Groups with cover-related classes (`windowcoverings`, `cover`, `curtain`, etc.) create cover entities
+  - Groups are identified by `driverId` pattern: `homey:app:com.swttt.devicegroups:*`
+  - Added comprehensive debug logging to help identify when groups are detected
+  - Groups work with any class type and are handled based on their capabilities and class
+
 ## [1.1.4-beta.5] - 2026-01-12
 
 ### Fixed
