@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import ssl
 from typing import Any
 
 import aiohttp
@@ -49,10 +50,22 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if not host.startswith(("http://", "https://")):
                     host = f"http://{host}"
 
+                # Detect if using HTTPS for SSL handling
+                use_https = host.startswith("https://")
+                
                 # Test connection - try multiple possible endpoints
-                # Create a temporary session for testing (Homey local API doesn't use SSL)
+                # For HTTPS connections (self-hosted servers), we need SSL but disable verification for self-signed certs
+                # For HTTP connections (local Homey), disable SSL entirely
                 timeout = aiohttp.ClientTimeout(total=10)
-                connector = aiohttp.TCPConnector(ssl=False)
+                if use_https:
+                    # For HTTPS: create SSL context that doesn't verify certificates (for self-signed certs)
+                    ssl_context = ssl.create_default_context()
+                    ssl_context.check_hostname = False
+                    ssl_context.verify_mode = ssl.CERT_NONE
+                    connector = aiohttp.TCPConnector(ssl=ssl_context)
+                else:
+                    # For HTTP: disable SSL entirely
+                    connector = aiohttp.TCPConnector(ssl=False)
                 
                 # Try different possible endpoints based on Homey API documentation
                 endpoints_to_try = [

@@ -37,11 +37,45 @@ async def async_setup_entry(
 
     for device_id, device in devices.items():
         capabilities = device.get("capabilitiesObj", {})
+        driver_id = device.get("driverId", "")
+        device_name = device.get("name", "Unknown")
+        device_class = device.get("class", "")
+        
+        # Check if this is a devicegroups group
+        is_devicegroups_group = driver_id.startswith("homey:app:com.swttt.devicegroups:")
+        if is_devicegroups_group:
+            _LOGGER.debug(
+                "Found devicegroups group in cover platform: %s (id: %s, class: %s, driverId: %s, capabilities: %s)",
+                device_name,
+                device_id,
+                device_class,
+                driver_id,
+                list(capabilities.keys())
+            )
+        
+        # Special handling for devicegroups groups: respect their class
+        # If a group has cover-related class, treat it as a cover
+        is_devicegroups_cover = (
+            is_devicegroups_group 
+            and device_class in ["windowcoverings", "cover", "curtain", "blind", "shutter", "awning", "garagedoor"]
+        )
+        
         # Support windowcoverings_state, windowcoverings_set, and garagedoor_closed capabilities
         # Reference: https://apps.developer.homey.app/the-basics/devices/capabilities
         # Note: Some devices use windowcoverings_set instead of windowcoverings_state
-        if any(cap in capabilities for cap in ["windowcoverings_state", "windowcoverings_set", "garagedoor_closed"]):
+        # Also support devicegroups groups with cover-related classes
+        has_cover_capabilities = any(
+            cap in capabilities for cap in ["windowcoverings_state", "windowcoverings_set", "garagedoor_closed"]
+        )
+        if has_cover_capabilities or is_devicegroups_cover:
             entities.append(HomeyCover(coordinator, device_id, device, api, zones))
+            if is_devicegroups_group:
+                _LOGGER.info(
+                    "Created cover entity for devicegroups group: %s (id: %s, has_cover_capabilities=%s)",
+                    device_name,
+                    device_id,
+                    has_cover_capabilities
+                )
 
     async_add_entities(entities)
 

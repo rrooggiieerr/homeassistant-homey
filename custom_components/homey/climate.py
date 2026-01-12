@@ -42,8 +42,44 @@ async def async_setup_entry(
 
     for device_id, device in devices.items():
         capabilities = device.get("capabilitiesObj", {})
+        driver_id = device.get("driverId", "")
+        device_class = device.get("class")
+        device_name = device.get("name", "Unknown")
+        
+        # Check if this is a devicegroups group
+        # Groups can have any class and are identified by driverId pattern: homey:app:com.swttt.devicegroups:*
+        is_devicegroups_group = driver_id.startswith("homey:app:com.swttt.devicegroups:")
+        
+        # Special handling for devicegroups groups: respect their class
+        # Groups can have class "heater" or "thermostat" but may not have target_temperature capability
+        is_devicegroups_climate = (
+            is_devicegroups_group 
+            and device_class in ["heater", "thermostat"]
+        )
+        
+        # Log devicegroups groups for debugging
+        if is_devicegroups_group:
+            _LOGGER.debug(
+                "Found devicegroups group: %s (id: %s, class: %s, driverId: %s, capabilities: %s)",
+                device_name,
+                device_id,
+                device_class,
+                driver_id,
+                list(capabilities.keys())
+            )
+        
+        # Create climate entity if it has target_temperature OR is a devicegroups climate group
         if "target_temperature" in capabilities:
             entities.append(HomeyClimate(coordinator, device_id, device, api, zones))
+            _LOGGER.debug("Created climate entity for device %s (has target_temperature)", device_name)
+        elif is_devicegroups_climate:
+            entities.append(HomeyClimate(coordinator, device_id, device, api, zones))
+            _LOGGER.info(
+                "Created climate entity for devicegroups group: %s (id: %s, class: %s) - note: no target_temperature capability",
+                device_name,
+                device_id,
+                device_class
+            )
 
     async_add_entities(entities)
 

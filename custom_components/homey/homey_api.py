@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import ssl
 from collections.abc import Callable
 from typing import Any
 
@@ -45,8 +46,19 @@ class HomeyAPI:
 
     async def connect(self) -> None:
         """Connect to Homey API."""
-        # Use SSL=False for local Homey API
-        connector = aiohttp.TCPConnector(ssl=False)
+        # Detect if using HTTPS for SSL handling
+        # For HTTPS connections (self-hosted servers), we need SSL but disable verification for self-signed certs
+        # For HTTP connections (local Homey), disable SSL entirely
+        use_https = self.host.startswith("https://")
+        if use_https:
+            # For HTTPS: create SSL context that doesn't verify certificates (for self-signed certs)
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+        else:
+            # For HTTP: disable SSL entirely
+            connector = aiohttp.TCPConnector(ssl=False)
         self.session = aiohttp.ClientSession(
             connector=connector,
             headers={"Authorization": f"Bearer {self.token}"},
@@ -368,11 +380,41 @@ class HomeyAPI:
                 _LOGGER.warning("Cannot convert %s to boolean for capability %s", value, capability_id)
                 return None
         
+        # Handle windowcoverings_state specially - can be enum ("up", "idle", "down") or numeric (0-1)
+        if capability_id == "windowcoverings_state":
+            # Check if it's an enum string value first
+            if isinstance(value, str):
+                value_stripped = value.strip().lower()
+                # Valid enum values for windowcoverings_state
+                if value_stripped in ("up", "idle", "down"):
+                    return value_stripped  # Return the enum string as-is
+            
+            # If not an enum string, treat as numeric (for numeric windowcoverings_state devices)
+            if isinstance(value, (int, float)):
+                return float(value)
+            
+            if isinstance(value, str):
+                value_stripped = value.strip()
+                # Try to convert to float for numeric windowcoverings_state
+                if value_stripped.replace(".", "").replace("-", "").isdigit():
+                    try:
+                        return float(value_stripped)
+                    except (ValueError, TypeError):
+                        pass
+            
+            # If we get here, it's neither a valid enum nor a valid number
+            _LOGGER.warning(
+                "Invalid value for capability %s: %s (must be 'up', 'idle', 'down', or a number)",
+                capability_id,
+                value[:50] if len(str(value)) > 50 else value,
+            )
+            return None
+        
         # Handle numeric capabilities - reject non-numeric strings
         numeric_capabilities = [
             "dim", "light_hue", "light_saturation", "light_temperature",
             "target_temperature", "measure_temperature", "fan_speed",
-            "volume_set", "windowcoverings_state",
+            "volume_set",
         ]
         
         if capability_id in numeric_capabilities:

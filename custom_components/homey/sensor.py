@@ -261,9 +261,28 @@ async def async_setup_entry(
     # Filter devices if device_filter is configured
     from . import filter_devices
     devices = filter_devices(devices, entry.data.get("device_filter"))
+    
+    # Track devicegroups groups we've logged (to avoid logging multiple times per device)
+    logged_devicegroups = set()
 
     for device_id, device in devices.items():
         capabilities = device.get("capabilitiesObj", {})
+        driver_id = device.get("driverId", "")
+        device_name = device.get("name", "Unknown")
+        device_class = device.get("class", "")
+        
+        # Check if this is a devicegroups group (log once per device, not per capability)
+        is_devicegroups_group = driver_id.startswith("homey:app:com.swttt.devicegroups:")
+        if is_devicegroups_group and device_id not in logged_devicegroups:
+            logged_devicegroups.add(device_id)
+            _LOGGER.debug(
+                "Found devicegroups group in sensor platform: %s (id: %s, class: %s, driverId: %s, capabilities: %s)",
+                device_name,
+                device_id,
+                device_class,
+                driver_id,
+                list(capabilities.keys())
+            )
         
         # First, handle explicitly mapped capabilities
         for capability_id in CAPABILITY_TO_SENSOR:
