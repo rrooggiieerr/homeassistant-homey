@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import ssl
 from collections.abc import Callable
 from typing import Any
 
@@ -45,8 +46,19 @@ class HomeyAPI:
 
     async def connect(self) -> None:
         """Connect to Homey API."""
-        # Use SSL=False for local Homey API
-        connector = aiohttp.TCPConnector(ssl=False)
+        # Detect if using HTTPS for SSL handling
+        # For HTTPS connections (self-hosted servers), we need SSL but disable verification for self-signed certs
+        # For HTTP connections (local Homey), disable SSL entirely
+        use_https = self.host.startswith("https://")
+        if use_https:
+            # For HTTPS: create SSL context that doesn't verify certificates (for self-signed certs)
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+        else:
+            # For HTTP: disable SSL entirely
+            connector = aiohttp.TCPConnector(ssl=False)
         self.session = aiohttp.ClientSession(
             connector=connector,
             headers={"Authorization": f"Bearer {self.token}"},

@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.5-dev.3] - 2026-01-12
+
+### Fixed
+- **Self-Hosted Server SSL Support**: Fixed SSL handling for Homey Self-Hosted Server users
+  - Previously, the integration always disabled SSL (`ssl=False`), causing HTTPS connections to fail
+  - Now properly detects HTTPS URLs and creates appropriate SSL context
+  - SSL certificate verification is disabled for self-signed certificates (common on self-hosted servers)
+  - HTTP connections (local Homey devices) continue to work as before
+  - Users can now use `https://` URLs for self-hosted servers without connection errors
+  - Port numbers in URLs are preserved (e.g., `https://homey.example.com:8443`)
+
 ## [1.1.5-dev.2] - 2026-01-12
 
 ### Fixed
