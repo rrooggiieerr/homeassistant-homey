@@ -148,26 +148,70 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 )
                 _LOGGER.debug("Updated device name: %s -> %s", device_entry.name, device_name)
             
-            # Update device area if room changed
-            area_id = None
+            # Update device area ONLY if:
+            # 1. Device has no area assigned (area_id is None), OR
+            # 2. Current area name matches the Homey zone name (was set by integration, not manually changed)
+            # This prevents overwriting user-assigned areas
+            from homeassistant.helpers import area_registry as ar
+            area_registry = ar.async_get(self.hass)
+            
+            current_area_id = device_entry.area_id
+            current_area_name = None
+            if current_area_id:
+                current_area = area_registry.async_get_area(current_area_id)
+                if current_area:
+                    current_area_name = current_area.name
+            
+            # Only update area if device has no area OR current area matches Homey zone
+            # This allows the integration to update areas when Homey zones change,
+            # but preserves user manual area assignments
+            should_update_area = False
+            new_area_id = None
+            
             if room_name:
-                # Find or create area
-                from homeassistant.helpers import area_registry as ar
-                area_registry = ar.async_get(self.hass)
+                # Find or create area for Homey zone
                 area = area_registry.async_get_area_by_name(room_name)
                 if area:
-                    area_id = area.id
+                    new_area_id = area.id
                 else:
-                    # Create new area
+                    # Create new area if it doesn't exist
                     area = area_registry.async_create(room_name)
-                    area_id = area.id
+                    new_area_id = area.id
+                
+                # Only update if:
+                # - Device has no area assigned, OR
+                # - Current area name matches the Homey zone name (integration-set area)
+                if current_area_id is None:
+                    should_update_area = True
+                    _LOGGER.debug("Assigning initial area %s to device %s", room_name, device_entry.name)
+                elif current_area_name == room_name:
+                    # Area matches Homey zone - safe to update if zone changed
+                    # (This handles zone renames in Homey)
+                    if current_area_id != new_area_id:
+                        should_update_area = True
+                        _LOGGER.debug("Updating area for device %s: zone name matches, updating area ID", device_entry.name)
+                else:
+                    # Current area doesn't match Homey zone - user manually changed it
+                    # Don't overwrite user's manual assignment
+                    _LOGGER.debug(
+                        "Skipping area update for device %s: current area '%s' doesn't match Homey zone '%s' (user-managed)",
+                        device_entry.name, current_area_name, room_name
+                    )
+            elif current_area_id is not None:
+                # Device has an area but Homey zone is None/empty
+                # Don't remove user-assigned areas - only remove if it was integration-set
+                # We can't reliably detect this, so we'll leave it as-is
+                _LOGGER.debug(
+                    "Device %s has area '%s' but no Homey zone - preserving user assignment",
+                    device_entry.name, current_area_name
+                )
             
-            if device_entry.area_id != area_id:
+            if should_update_area and new_area_id and current_area_id != new_area_id:
                 device_registry.async_update_device(
                     device_entry.id,
-                    area_id=area_id,
+                    area_id=new_area_id,
                 )
-                _LOGGER.debug("Updated device area: %s -> %s", device_entry.area_id, area_id)
+                _LOGGER.debug("Updated device area: %s -> %s", current_area_id, new_area_id)
 
     async def _remove_deleted_devices(self, deleted_device_ids: set[str]) -> None:
         """Remove deleted devices from device registry."""

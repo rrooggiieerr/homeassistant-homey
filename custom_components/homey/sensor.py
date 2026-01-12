@@ -168,6 +168,27 @@ CAPABILITY_TO_SENSOR = {
         "state_class": SensorStateClass.MEASUREMENT,
         "unit": "%",
     },
+    # Battery-specific capabilities
+    "measure_capacity": {
+        "device_class": SensorDeviceClass.ENERGY,  # Battery capacity in kWh
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": UnitOfEnergy.KILO_WATT_HOUR,
+    },
+    "measure_max_charging_power": {
+        "device_class": SensorDeviceClass.POWER,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": UnitOfPower.WATT,
+    },
+    "measure_max_discharging_power": {
+        "device_class": SensorDeviceClass.POWER,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": UnitOfPower.WATT,
+    },
+    "measure_emergency_power_reserve": {
+        "device_class": SensorDeviceClass.ENERGY,  # Emergency reserve in Wh/kWh
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": None,  # Will use unit from capability data (Wh or kWh)
+    },
     "measure_wind_speed": {  # Alternative name for wind_strength
         "device_class": None,
         "state_class": SensorStateClass.MEASUREMENT,
@@ -266,11 +287,13 @@ async def async_setup_entry(
                 continue
             
             # Check if this is a measure_* or meter_* capability (including sub-capabilities)
+            # Also handle vacuum-specific capabilities: clean_time, clean_area, clean_last, position_x, position_y
             is_measure = capability_id.startswith("measure_")
             is_meter = capability_id.startswith("meter_")
             is_accumulated_cost = capability_id == "accumulatedCost"
+            is_vacuum_sensor = capability_id in ["clean_time", "clean_area", "clean_last", "position_x", "position_y"]
             
-            if is_measure or is_meter or is_accumulated_cost:
+            if is_measure or is_meter or is_accumulated_cost or is_vacuum_sensor:
                 # Skip internal Homey maintenance buttons (same logic as button.py)
                 capability_lower = capability_id.lower()
                 if any(keyword in capability_lower for keyword in ["migrate", "reset", "identify"]):
@@ -346,12 +369,22 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
         if "." in capability_id:
             # Sub-capability: "measure_temperature.inside" -> "Inside Temperature"
             parts = capability_id.split(".")
-            base_name = parts[0].replace("measure_", "").replace("meter_", "").replace("_", " ").title()
+            base_cap = parts[0]
+            # Special handling: meter_power should be labeled as "Energy", not "Power"
+            if base_cap == "meter_power":
+                base_name = "Energy"
+            else:
+                base_name = base_cap.replace("measure_", "").replace("meter_", "").replace("_", " ").title()
             sub_name = parts[1].replace("_", " ").title()
             self._attr_name = f"{device.get('name', 'Unknown')} {sub_name} {base_name}"
         else:
             # Regular capability
-            self._attr_name = f"{device.get('name', 'Unknown')} {capability_id.replace('measure_', '').replace('meter_', '').replace('_', ' ').title()}"
+            # Special handling: meter_power should be labeled as "Energy", not "Power"
+            if capability_id == "meter_power":
+                display_name = "Energy"
+            else:
+                display_name = capability_id.replace("measure_", "").replace("meter_", "").replace("_", " ").title()
+            self._attr_name = f"{device.get('name', 'Unknown')} {display_name}"
         
         self._attr_unique_id = f"homey_{device_id}_{capability_id}"
         self._attr_device_class = sensor_config.get("device_class")
@@ -394,15 +427,22 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
                     else:
                         # Generic currency symbol or no unit - leave empty for user customization
                         self._attr_native_unit_of_measurement = None
-            elif self._attr_device_class == SensorDeviceClass.ENERGY and base_capability == "meter_power":
-                # For energy sensors (meter_power.*), ensure unit is kWh for Energy dashboard compatibility
-                # If unit is already kWh or similar, use it; otherwise default to kWh
+            elif self._attr_device_class == SensorDeviceClass.ENERGY:
+                # For energy sensors, ensure unit is compatible with Energy dashboard
+                # Accept kWh, Wh, or other energy units
                 unit_lower = unit_from_capability.lower()
-                if "kwh" in unit_lower or "wh" in unit_lower:
+                if "kwh" in unit_lower:
+                    # Already in kWh - use as is
                     self._attr_native_unit_of_measurement = unit_from_capability
-                else:
-                    # Default to kWh for Energy dashboard compatibility
+                elif "wh" in unit_lower and "kwh" not in unit_lower:
+                    # Wh (watt-hours) - use as is (Home Assistant supports Wh)
+                    self._attr_native_unit_of_measurement = unit_from_capability
+                elif base_capability == "meter_power":
+                    # meter_power.* defaults to kWh for Energy dashboard compatibility
                     self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+                else:
+                    # Other energy sensors - use unit from capability
+                    self._attr_native_unit_of_measurement = unit_from_capability
             else:
                 self._attr_native_unit_of_measurement = unit_from_capability
         else:

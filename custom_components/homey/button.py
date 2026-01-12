@@ -169,20 +169,34 @@ async def async_setup_entry(
     
     for device_id, device in devices.items():
         capabilities = device.get("capabilitiesObj", {})
-        # Check for button capabilities (button, button.1, button.2, etc.)
+        # Check for button capabilities:
+        # - Standard: button, button.1, button.2, etc.
+        # - Device-specific: gardena_button.park, gardena_button.start, etc.
         # Exclude internal Homey maintenance capabilities that shouldn't be exposed as buttons
         # Reference: https://apps.developer.homey.app/the-basics/devices/capabilities#maintenance-actions
         for capability_id in capabilities:
-            if capability_id == "button" or capability_id.startswith("button."):
-                capability_obj = capabilities.get(capability_id, {})
-                
+            capability_obj = capabilities.get(capability_id, {})
+            
+            # Check if this is a button capability
+            is_button = (
+                capability_id == "button" or 
+                capability_id.startswith("button.") or
+                capability_id.endswith("_button") or
+                capability_id.endswith("_button.park") or
+                capability_id.endswith("_button.start") or
+                (capability_id.startswith("gardena_button.") and capability_obj.get("setable"))
+            )
+            
+            if is_button:
                 # Skip maintenance action buttons
                 if is_maintenance_button(capability_id, capability_obj):
                     _LOGGER.debug("Skipping maintenance action button: %s", capability_id)
                     continue
                 
-                entities.append(HomeyDeviceButton(coordinator, device_id, device, capability_id, api, zones))
-                device_buttons_count += 1
+                # Only add settable button capabilities
+                if capability_obj.get("setable"):
+                    entities.append(HomeyDeviceButton(coordinator, device_id, device, capability_id, api, zones))
+                    device_buttons_count += 1
 
     if entities:
         _LOGGER.info(

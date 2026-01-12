@@ -22,6 +22,7 @@ SELECT_CAPABILITIES = [
     # Add capabilities here that have options/modes
     # Example: "thermostat_mode" is handled by climate platform
     # "some_mode": {"options": ["option1", "option2", "option3"]},
+    "operating_program",  # Heat pump operating program
 ]
 
 

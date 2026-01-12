@@ -4,15 +4,15 @@
 [![GitHub issues](https://img.shields.io/github/issues/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/issues)
 [![GitHub stars](https://img.shields.io/github/stars/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/stargazers)
 
-**Version**: 1.1.4-dev.11 | **Last Updated**: 2026-01-11 | [Changelog](CHANGELOG.md)
+**Version**: 1.1.4-dev.13 | **Last Updated**: 2026-01-12 | [Changelog](CHANGELOG.md)
 
-A Home Assistant integration that automatically discovers and connects all your Homey devices, making them available natively in Home Assistant.
+A Homey integration for Home Assistant that automatically discovers and connects all your Homey devices, making them available natively in Home Assistant.
 
 ---
 
 ## Overview
 
-This integration bridges your [Homey](https://homey.app) hub with Home Assistant, allowing you to control all your Homey devices directly from Home Assistant. It supports a wide range of device types including lights, switches, sensors, climate devices, and more. Additionally, it allows you to trigger Homey Flows (automations) from Home Assistant.
+This Homey integration brings your [Homey](https://homey.app) hub into Home Assistant, allowing you to control all your Homey devices directly from Home Assistant. It supports a wide range of device types including lights, switches, sensors, climate devices, and more. Additionally, it allows you to trigger Homey Flows (automations) from Home Assistant.
 
 **Note**: This is a work in progress made by just one guy with too much time on his hands who couldn't sit on his ass waiting for someone else to create this plugin. It works, but expect bugs, occasional updates, and the occasional "oops, that broke something" moment. 🤷‍♂️
 
@@ -46,24 +46,60 @@ This integration bridges your [Homey](https://homey.app) hub with Home Assistant
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
   - [Manual Installation](#manual-installation)
+    - [Option 1: Direct File System Access](#option-1-direct-file-system-access)
+    - [Option 2: Using Samba (Network Drive)](#option-2-using-samba-network-drive)
   - [Installation via HACS](#installation-via-hacs)
+    - [Prerequisites](#prerequisites-1)
+    - [Installation Steps](#installation-steps)
+    - [Updating via HACS](#updating-via-hacs)
+    - [Enabling Automatic Updates for Beta/Dev Releases](#enabling-automatic-updates-for-betadev-releases)
   - [Switching Between Release Channels (Stable/Beta/Dev)](#switching-between-release-channels-stablebetadev)
   - [Migrating from Manual Installation to HACS](#migrating-from-manual-installation-to-hacs)
 - [Updating the Integration](#updating-the-integration)
+  - [Step 1: Download the Latest Version](#step-1-download-the-latest-version)
+  - [Step 2: Replace the Integration Files](#step-2-replace-the-integration-files)
+  - [Step 3: Restart Home Assistant](#step-3-restart-home-assistant)
+  - [Step 4: Reload the Integration (Recommended)](#step-4-reload-the-integration-recommended)
+  - [Step 5: Verify the Update](#step-5-verify-the-update)
+  - [Troubleshooting Updates](#troubleshooting-updates)
 - [Configuration](#configuration)
+  - [Setup Steps](#setup-steps)
 - [Usage](#usage)
   - [Devices](#devices)
   - [Homey Flows (Automations)](#homey-flows-automations)
+    - [1. Button Entities](#1-button-entities)
+    - [2. Service Calls](#2-service-calls)
   - [Homey Scenes and Moods](#homey-scenes-and-moods)
   - [Physical Device Buttons](#physical-device-buttons)
 - [Device Organization](#device-organization)
 - [Automatic Synchronization](#automatic-synchronization)
-- [Supported Devices](#supported-devices)
+  - [Device Name Changes](#device-name-changes)
+  - [Room/Area Changes](#roomarea-changes)
+  - [Device Deletion](#device-deletion)
+  - [Update Frequency](#update-frequency)
+- [Supported Devices](SUPPORTED_DEVICES.md)
 - [Known Issues & Limitations](#known-issues--limitations)
+  - [Room/Zone Detection](#roomzone-detection)
+  - [Config Flow Window Size](#config-flow-window-size)
+  - [Entity Name Updates](#entity-name-updates)
+  - [Socket.IO Real-time Updates](#socketio-real-time-updates)
 - [Troubleshooting](#troubleshooting)
+  - [Connection Issues](#connection-issues)
+  - [Devices Not Appearing](#devices-not-appearing)
+  - [Duplicate Devices](#duplicate-devices)
+  - [Real-time Updates Not Working](#real-time-updates-not-working)
+  - [Device Changes Not Syncing](#device-changes-not-syncing)
+  - [Gathering Device Information for Troubleshooting](#gathering-device-information-for-troubleshooting)
 - [Development](#development)
+  - [Project Structure](#project-structure)
+  - [Key Technical Features](#key-technical-features)
+  - [Contributing](#contributing)
+  - [Reporting Issues](#reporting-issues)
+    - [Gathering Device Information for Troubleshooting](#gathering-device-information-for-troubleshooting)
 - [API Documentation](#api-documentation)
 - [License](#license)
+- [Credits](#credits)
+- [Acknowledgments](#acknowledgments)
 - [Support](#support)
 
 ---
@@ -601,179 +637,34 @@ The integration automatically synchronizes changes made in Homey with Home Assis
 
 ## Supported Devices
 
-The integration supports devices with the following capabilities:
+The integration supports a wide range of Homey devices and capabilities. For detailed information about all supported device types and capabilities, see [SUPPORTED_DEVICES.md](SUPPORTED_DEVICES.md).
 
-### Lights
-- `onoff` - Basic on/off control
-- `dim` - Brightness control (0-100%)
-- `light_hue` - Color hue control (0-360°)
-- `light_saturation` - Color saturation control (0-100%)
-- `light_temperature` - Color temperature control (Kelvin)
+### Overview
 
-**Supported Color Modes**:
-- `onoff` - Simple on/off
-- `brightness` - Dimming only
-- `hs` - Hue and saturation (full color) - **Full color control now working!**
-- `color_temp` - Color temperature (warm/cool white) - Uses Kelvin scale (2000K-6500K)
+The integration automatically detects and creates entities for:
 
-**Note**: HS color and color temperature modes are mutually exclusive. If both are available, HS color mode is preferred.
+- **Lights** - Full dimming, color (HS), and color temperature control
+- **Switches** - On/off control, including multi-channel devices
+- **Sensors** - Temperature, humidity, power, energy, and many more (including Energy Dashboard compatible sensors)
+- **Binary Sensors** - Motion, contact, alarms, and all boolean capabilities
+- **Covers** - Window coverings and garage doors with position control
+- **Climate** - Thermostats with custom mode support
+- **Fans** - Fan speed control
+- **Locks** - Lock state and control
+- **Media Players** - Full media control with metadata support
+- **Scenes & Moods** - Activate Homey scenes and moods
+- **Buttons** - Physical device buttons and Homey Flow triggers
+- **Select Entities** - Mode and option selection (automatically detected for enum capabilities)
+- **Number Entities** - Numeric settings (e.g., temperature targets)
+- **Vacuum Cleaners** - Full vacuum control with cleaning modes and status
+- **Battery Devices** - Battery storage systems with energy tracking
+- **Lawn Mowers** - Gardena lawn mower support
+- **Heat Pumps** - Comprehensive heat pump control with multiple temperature zones
+- **Solar Panels** - Solar panel/inverter monitoring
 
-**Color Control**: The integration automatically converts between Home Assistant's color format (hue 0-360°, saturation 0-100%) and Homey's normalized format (0-1). Color changes work reliably for all supported lights, and colors sync correctly on startup by refreshing device state when entities are first added.
+**Generic Capability Support**: The integration automatically creates entities for ANY `measure_*`, `meter_*`, boolean, or enum capability, ensuring support for new device types without code changes.
 
-### Switches
-- `onoff` - On/off control
-- `onoff.output1`, `onoff.output2`, etc. - Multi-channel switches (sub-capabilities)
-
-**Multi-Channel Support**: Devices with multiple outputs (e.g., Shelly Plus 2 PM, Fibaro Double Switch) create separate switch entities for each output channel. Each channel gets its own entity with a descriptive name (e.g., "Device Name Output 1", "Device Name Output 2").
-
-**Note**: Devices with dimming or color capabilities are created as lights, not switches.
-
-### Sensors
-- `measure_temperature` - Temperature sensor (°C)
-- `measure_temperature.inside`, `measure_temperature.outside`, etc. - Sub-capability temperature sensors
-- `measure_humidity` - Humidity sensor (%)
-- `measure_pressure` - Pressure sensor (hPa)
-- `measure_power` - Power consumption sensor (W)
-- `measure_power.output1`, `measure_power.output2`, etc. - Multi-channel power sensors
-- `measure_voltage` - Voltage sensor (V)
-- `measure_current` - Current sensor (A)
-- `measure_luminance` - Light level sensor (lux)
-- `measure_co2` - CO2 sensor (ppm)
-- `measure_co` - CO sensor (ppm)
-- `measure_noise` - Sound pressure sensor (dB)
-- `measure_rain` - Rainfall sensor (mm)
-- `measure_wind_strength` - Wind speed sensor (m/s)
-- `measure_wind_angle` - Wind direction sensor (°)
-- `measure_ultraviolet` - UV index sensor
-- `measure_pm25` - PM2.5 air quality sensor (µg/m³)
-- `measure_pm10` - PM10 air quality sensor (µg/m³)
-- `measure_voc` - Volatile Organic Compounds sensor (µg/m³)
-- `measure_aqi` - Air Quality Index sensor
-- `measure_frequency` - Frequency sensor (Hz)
-- `measure_gas` - Gas sensor (ppm)
-- `measure_soil_moisture` - Soil moisture sensor (%)
-- `measure_soil_temperature` - Soil temperature sensor (°C)
-- `measure_energy` - Energy consumption sensor (kWh) with proper state class for energy tracking
-- `meter_power` - Energy meter (kWh) with `TOTAL_INCREASING` state class - **Energy Dashboard compatible**
-- `meter_power.imported` - Imported energy meter (kWh) - **Energy Dashboard compatible**
-- `meter_power.exported` - Exported energy meter (kWh) - **Energy Dashboard compatible**
-- `meter_power.output1`, `meter_power.output2`, etc. - Multi-channel energy meters - **Energy Dashboard compatible**
-- `meter_water` - Water meter (m³) with `TOTAL_INCREASING` state class
-- `meter_gas` - Gas meter (m³) with `TOTAL_INCREASING` state class
-- `measure_price_total` - Total electricity price (currency/kWh, e.g., SEK/kWh) - **Energy Dashboard compatible**
-- `measure_price_lowest` - Lowest electricity price (currency/kWh)
-- `measure_price_highest` - Highest electricity price (currency/kWh)
-- `accumulatedCost` - Accumulated energy cost (currency, e.g., SEK) - Auto-detects currency from price sensors
-
-**Sub-Capability Support**: The integration fully supports sub-capabilities (capabilities with dots, e.g., `measure_temperature.inside`, `measure_power.output1`). Each sub-capability creates its own sensor entity with a descriptive name.
-
-**Energy Dashboard Compatibility**: All energy sensors (`meter_power` and sub-capabilities) are configured with proper `device_class: energy` and `state_class: total_increasing` for Home Assistant's Energy dashboard. This allows you to track individual device energy consumption in the Energy dashboard.
-
-**Generic Sensor Support**: The integration automatically creates sensor entities for ANY `measure_*` or `meter_*` capability, even if not explicitly listed above. This ensures support for new device types and capabilities without code changes.
-
-**Energy Dashboard Compatibility**: All energy sensors (`meter_power` and sub-capabilities) are configured with proper `device_class: energy` and `state_class: total_increasing` for Home Assistant's Energy dashboard. This allows you to track individual device energy consumption in the Energy dashboard.
-
-**Generic Sensor Support**: The integration automatically creates sensor entities for ANY `measure_*` or `meter_*` capability, even if not explicitly listed above. This ensures support for new device types and capabilities without code changes.
-
-### Binary Sensors
-- `alarm_motion` - Motion detector
-- `alarm_contact` - Door/window contact sensor
-- `alarm_tamper` - Tamper sensor
-- `alarm_smoke` - Smoke detector
-- `alarm_co` - CO alarm
-- `alarm_co2` - CO2 alarm
-- `alarm_water` - Water leak detector
-- `alarm_battery` - Low battery indicator
-- `alarm_gas` - Gas alarm
-- `alarm_fire` - Fire alarm
-- `alarm_panic` - Panic alarm
-- `alarm_burglar` - Burglar alarm
-- `alarm_generic` - Generic alarm
-- `alarm_maintenance` - Maintenance required indicator
-- `button` - Physical button press detection
-- `vibration` - Vibration detection
-- `thermofloor_onoff` - Thermostat heating active/idle status (read-only status indicator)
-
-### Covers
-- `windowcoverings_state` - Window covering position (0-100%)
-- `windowcoverings_set` - Alternative window covering position capability (some devices use this instead of `windowcoverings_state`)
-- `windowcoverings_tilt_up` / `windowcoverings_tilt_down` - Tilt control
-- `garagedoor_closed` - Garage door state (open/closed)
-
-**Note**: The integration supports both `windowcoverings_state` and `windowcoverings_set` capabilities. Devices using either capability will be correctly detected as covers.
-
-### Climate
-- `target_temperature` - Target temperature control (°C)
-- `target_humidity` - Target humidity control (%)
-- `measure_temperature` - Current temperature reading (°C)
-- `measure_humidity` - Current humidity reading (%)
-- `thermostat_mode` - HVAC mode control (off, heat, cool, auto)
-- `thermostat_mode_off` - Off mode capability
-- `thermostat_mode_heat` - Heat mode capability
-- `thermostat_mode_cool` - Cool mode capability
-- `thermostat_mode_auto` - Auto mode capability
-- `thermofloor_mode` - Custom thermostat mode (e.g., ThermoFloor: Heat, Energy Save Heat, Off, Cool)
-- `*_mode` - Any custom enum capability ending with `_mode` is automatically detected and supported
-
-**Supported HVAC Modes**: OFF, HEAT, COOL, AUTO, HEAT_COOL (automatically detected based on available capabilities)
-
-**Custom Thermostat Support**: The integration automatically detects and supports custom thermostat mode capabilities (e.g., `thermofloor_mode`). Custom mode values are mapped to standard HVAC modes:
-- "Off" → OFF
-- "Heat" → HEAT
-- "Cool" → COOL
-- "Energy Save Heat" / "Auto" → AUTO
-
-**Turn On/Off Support**: Climate entities support `turn_on` and `turn_off` actions:
-- If device has a settable `onoff` capability, it's used for control
-- Otherwise, `turn_on` sets to first non-OFF mode, `turn_off` sets to OFF mode
-
-### Fans
-- `fan_speed` - Fan speed control (0-100%)
-- `onoff` - On/off control
-
-### Locks
-- `locked` - Lock state and control
-
-### Media Players
-- `volume_set` - Volume control (0-100%)
-- `volume_mute` - Mute control
-- `speaker_playing` - Play/pause control
-- `speaker_next` - Next track control
-- `speaker_prev` - Previous track control
-- `speaker_artist` - Current artist name
-- `speaker_album` - Current album name
-- `speaker_track` - Current track title
-- `speaker_duration` - Track duration (seconds)
-- `speaker_position` - Current playback position (seconds)
-- `speaker_shuffle` - Shuffle state
-- `speaker_repeat` - Repeat state
-
-### Scenes
-- All Homey scenes appear as Scene entities
-- Activate scenes directly from Home Assistant
-
-### Moods
-- All Homey moods appear as Scene entities (with distinct icon)
-- Activate moods directly from Home Assistant
-
-### Buttons
-- `button` - Single button device
-- `button.1`, `button.2`, etc. - Multi-button devices
-- Physical device buttons appear as Button entities for automation triggers
-
-### Select Entities
-- **Generic Enum Support**: Automatically creates select entities for ANY enum-type capability
-- `thermofloor_mode` - Thermostat mode selection (Heat, Energy Save Heat, Off, Cool)
-- `measure_price_level` - Price level selection (e.g., VERY_CHEAP, CHEAP, NORMAL, EXPENSIVE)
-- `measure_price_info_level` - Price info level selection
-- `price_level` - Price level indicator
-- Any capability with `values` or `options` (enum type) is automatically created as a select entity
-
-**Note**: Enum capabilities are automatically detected and converted to select entities. This ensures support for new device types and capabilities without code changes.
-
-### Number Entities
-- Ready for future capabilities that require numeric input
-- Currently placeholder platform - will be populated as new capabilities are identified
+For complete details on all supported capabilities, device classes, and entity types, please see the [Supported Devices documentation](SUPPORTED_DEVICES.md).
 
 ---
 
@@ -901,7 +792,9 @@ custom_components/homey/
 ├── coordinator.py      # Data update coordinator with device registry sync
 ├── homey_api.py        # Homey API client
 ├── device_info.py      # Device info helper functions
+├── permissions.py      # Permission checking utilities
 ├── strings.json        # User-facing strings
+├── services.yaml       # Service definitions
 ├── switch.py           # Switch platform
 ├── light.py            # Light platform
 ├── sensor.py           # Sensor platform
@@ -911,7 +804,11 @@ custom_components/homey/
 ├── fan.py              # Fan platform
 ├── lock.py             # Lock platform
 ├── media_player.py     # Media player platform
-└── button.py           # Button platform (for Flows)
+├── button.py           # Button platform (for Flows and device buttons)
+├── scene.py            # Scene platform
+├── select.py           # Select entity platform
+├── number.py           # Number entity platform
+└── vacuum.py           # Vacuum cleaner platform
 ```
 
 ### Key Technical Features

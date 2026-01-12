@@ -9,6 +9,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.4-dev.13] - 2026-01-12
+
+### Fixed
+- **Light Detection for Socket-Class Devices**: Fixed devices with `class: "socket"` that have dimming/color capabilities not being detected as lights
+  - Devices with `onoff` + (`dim` OR `light_hue` OR `light_temperature`) are now correctly detected as lights
+  - Philips Hue and other dimmable devices with socket class now work correctly
+  - Switch platform properly skips devices with light capabilities
+- **Sensor Labeling**: Fixed incorrect labeling of energy sensors
+  - `meter_power` (kWh) sensors now labeled as "Energy" instead of "Power"
+  - `measure_power` (W) sensors remain labeled as "Power"
+  - Improves clarity in Home Assistant UI
+- **Cover Operation**: Improved cover entity operation and debugging
+  - Added explicit handling for `windowcoverings_set` capability (numeric 0-1)
+  - Added debug logging for cover operations (open/close/position)
+  - Better error handling when cover operations fail
+- **Area Assignment**: Fixed user-assigned areas being overwritten by Homey zones
+  - User-manually assigned areas are now preserved and not overwritten
+  - Areas are only updated if they match the Homey zone name (integration-set areas)
+  - Allows users to organize devices in Home Assistant without them reverting
+
+### Added
+- **Battery Device Support**: Added comprehensive support for battery devices (`class: "battery"`)
+  - `measure_capacity` → Energy sensor (kWh) for battery capacity
+  - `measure_max_charging_power` → Power sensor (W) for max charging power
+  - `measure_max_discharging_power` → Power sensor (W) for max discharging power
+  - `measure_emergency_power_reserve` → Energy sensor (Wh/kWh) for emergency reserve
+  - All battery capabilities automatically created as sensors with proper device classes
+- **Lawn Mower Support**: Added support for Gardena lawn mowers
+  - `gardena_button.park` and `gardena_button.start` buttons now detected
+  - Generic button pattern matching for device-specific buttons
+  - All Gardena sensors (`gardena_wireless_quality`, `gardena_mower_state`, `gardena_operating_hours`) supported
+- **Heat Pump Support**: Added comprehensive support for heat pumps (`class: "heatpump"`)
+  - `target_temperature.*` sub-capabilities (normal, comfort, reduced, dhw, dhw2) → Number entities
+  - `operating_program` → Select entity for heating program selection
+  - Boolean capabilities (`circulation_pump`, `comfort_program`, `eco_program`, `hot_water`, `compressor_active`) → Binary sensors
+  - All temperature sensors (`measure_temperature.*`) automatically created
+  - Compressor statistics (`compressor_hours`, `compressor_starts`) as sensors
+- **Generic Boolean Binary Sensors**: Added automatic detection of all boolean-type capabilities as binary sensors
+  - Previously only `alarm_*` capabilities were auto-detected
+  - Now all boolean capabilities (read-only or settable) are detected as binary sensors
+  - Excludes button capabilities (handled by button platform)
+- **Number Entity Pattern Matching**: Added pattern-based detection for number entities
+  - `target_temperature.*` sub-capabilities automatically detected as number entities
+  - Supports any numeric sub-capability that's settable
+
+### Changed
+- **Light Detection Logging**: Enhanced logging for light entity creation
+  - Now logs device class in addition to capabilities
+  - Added debug logging for devices not detected as lights (for troubleshooting)
+
 ## [1.1.4-dev.12] - 2026-01-11
 
 ### Fixed

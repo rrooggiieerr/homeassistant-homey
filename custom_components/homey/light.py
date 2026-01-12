@@ -75,28 +75,44 @@ async def async_setup_entry(
                         "Detected Philips Hue device %s (%s) - treating as light (driver: %s, dim=%s, temp=%s, hue=%s)",
                         device_id, device_name, device.get("driverUri", "unknown"), has_dim, has_temp, has_hue
                     )
-            
-            # Sunricher dimming devices - should be lights if they have onoff
-            # Even if dim isn't exposed, if it's a Sunricher dimmer, treat as light
-            if "sunricher" in driver_uri:
-                if has_onoff:
-                    is_known_light_device = True
-                    _LOGGER.info(
-                        "Detected Sunricher dimming device %s (%s) - treating as light (driver: %s, dim=%s)",
-                        device_id, device_name, device.get("driverUri", "unknown"), has_dim
-                    )
+        
+        # Also check for generic devices with dim capability (e.g., generic Zigbee dimmers)
+        # Devices with class "socket" but having dim capability should be lights, not switches
+        device_class = device.get("class", "").lower()
+        is_generic_dimmable = (
+            has_onoff and has_dim and 
+            (device_class in ["socket", "other"] or not device_class)
+        )
+        
+        # Sunricher dimming devices - should be lights if they have onoff
+        # Even if dim isn't exposed, if it's a Sunricher dimmer, treat as light
+        if driver_uri and "sunricher" in driver_uri:
+            if has_onoff:
+                is_known_light_device = True
+                _LOGGER.info(
+                    "Detected Sunricher dimming device %s (%s) - treating as light (driver: %s, dim=%s)",
+                    device_id, device_name, device.get("driverUri", "unknown"), has_dim
+                )
         
         # Create light entity if:
         # 1. Has onoff AND (dim OR hue OR temp) - standard light detection
+        #    This catches devices with class "socket" that have light capabilities (e.g., Philips Hue)
         # 2. OR is a known light device type (device-specific detection)
+        # 3. OR is a generic dimmable device (onoff + dim, regardless of class)
         # Note: Even if capabilities aren't fully exposed, we create the light entity
         # and let the entity class determine supported features based on available capabilities
-        if (has_onoff and (has_dim or has_hue or has_temp)) or is_known_light_device:
+        # 
+        # IMPORTANT: Devices with class "socket" but having dim/color capabilities should be lights, not switches
+        # The switch platform will skip them if has_light_capabilities is True
+        is_light = (has_onoff and (has_dim or has_hue or has_temp)) or is_known_light_device or is_generic_dimmable
+        
+        if is_light:
             # Log capabilities for debugging
             _LOGGER.info(
-                "Creating light entity for device %s (%s) - onoff=%s, dim=%s, hue=%s, saturation=%s, temp=%s, driver=%s",
+                "Creating light entity for device %s (%s) - class=%s, onoff=%s, dim=%s, hue=%s, saturation=%s, temp=%s, driver=%s",
                 device_id,
                 device_name,
+                device_class or "none",
                 has_onoff,
                 has_dim,
                 has_hue,
@@ -105,6 +121,13 @@ async def async_setup_entry(
                 device.get("driverUri", "unknown")
             )
             entities.append(HomeyLight(coordinator, device_id, device, api, zones))
+        else:
+            # Log why device was NOT detected as light (for debugging)
+            if has_onoff:
+                _LOGGER.debug(
+                    "Device %s (%s) has onoff but not detected as light - class=%s, dim=%s, hue=%s, temp=%s",
+                    device_id, device_name, device_class or "none", has_dim, has_hue, has_temp
+                )
 
     _LOGGER.debug("Created %d Homey light entities", len(entities))
     async_add_entities(entities)

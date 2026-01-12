@@ -24,6 +24,12 @@ NUMBER_CAPABILITIES = [
     # "some_setting": {"min": 0, "max": 100, "step": 1, "unit": "%"},
 ]
 
+# Patterns for capabilities that should be number entities
+# These are sub-capabilities that need numeric control but aren't the main capability
+NUMBER_CAPABILITY_PATTERNS = [
+    "target_temperature.",  # target_temperature.normal, target_temperature.comfort, etc.
+]
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -44,11 +50,46 @@ async def async_setup_entry(
 
     for device_id, device in devices.items():
         capabilities = device.get("capabilitiesObj", {})
-        # Check for capabilities that should be number entities
-        # For now, this is a placeholder - add specific capabilities as needed
+        
+        # Check explicitly listed number capabilities
         for capability_id in NUMBER_CAPABILITIES:
             if capability_id in capabilities:
                 cap_data = capabilities[capability_id]
+                # Only add if settable (user can control it)
+                if cap_data.get("setable"):
+                    entities.append(
+                        HomeyNumber(coordinator, device_id, device, capability_id, cap_data, api, zones)
+                    )
+        
+        # Check for pattern-based number capabilities (sub-capabilities)
+        for capability_id, cap_data in capabilities.items():
+            # Skip if already handled above
+            if capability_id in NUMBER_CAPABILITIES:
+                continue
+            
+            # Skip if not settable (can't control it)
+            if not cap_data.get("setable"):
+                continue
+            
+            # Skip if it's the base capability handled by another platform
+            # (e.g., target_temperature is handled by climate platform)
+            if capability_id == "target_temperature":
+                continue
+            
+            # Check if this matches a pattern for number entities
+            is_number_pattern = any(
+                capability_id.startswith(pattern) for pattern in NUMBER_CAPABILITY_PATTERNS
+            )
+            
+            # Also check if it's a numeric type capability that's settable
+            # and not already handled by another platform
+            is_numeric_settable = (
+                cap_data.get("type") == "number" and
+                cap_data.get("setable") and
+                "." in capability_id  # Sub-capability (e.g., target_temperature.normal)
+            )
+            
+            if is_number_pattern or is_numeric_settable:
                 entities.append(
                     HomeyNumber(coordinator, device_id, device, capability_id, cap_data, api, zones)
                 )

@@ -84,6 +84,7 @@ PLATFORMS: list[Platform] = [
     Platform.NUMBER,
     Platform.SELECT,
     Platform.SCENE,
+    Platform.VACUUM,
 ]
 
 
