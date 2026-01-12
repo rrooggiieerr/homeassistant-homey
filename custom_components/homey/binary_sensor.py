@@ -38,6 +38,12 @@ CAPABILITY_TO_DEVICE_CLASS = {
     "alarm_maintenance": None,  # Generic binary sensor
     "button": None,  # Generic binary sensor (BinarySensorDeviceClass.BUTTON may not be available in all versions)
     "vibration": None,  # Generic binary sensor
+    # Thermostat-specific binary sensors
+    "thermofloor_onoff": BinarySensorDeviceClass.RUNNING,  # Heating active/idle
+    # Vacuum-specific binary sensors
+    "water_box_attached": None,  # Generic binary sensor
+    "mop_attached": None,  # Generic binary sensor
+    "mop_dry_status": None,  # Generic binary sensor
 }
 
 
@@ -69,40 +75,44 @@ async def async_setup_entry(
                     HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones)
                 )
 
-        # Then, handle ALL alarm_* capabilities generically (including unknown ones)
+        # Then, handle ALL boolean capabilities generically (including unknown ones)
         # This ensures we support new device types and capabilities automatically
         # Reference: https://apps.developer.homey.app/the-basics/devices/capabilities#sub-capabilities-using-the-same-capability-more-than-once
-        for capability_id in capabilities:
+        for capability_id, cap_data in capabilities.items():
             # Skip if already handled above
             if capability_id in CAPABILITY_TO_DEVICE_CLASS:
                 continue
             
-            # Check if this is an alarm_* capability (including sub-capabilities)
-            if capability_id.startswith("alarm_"):
-                # Skip internal Homey maintenance buttons (same logic as button.py)
-                capability_lower = capability_id.lower()
-                if any(keyword in capability_lower for keyword in ["migrate", "reset", "identify"]):
-                    _LOGGER.debug("Skipping internal Homey maintenance capability: %s", capability_id)
+            # Check if this is a boolean-type capability
+            is_boolean = cap_data.get("type") == "boolean"
+            
+            # Skip if not boolean
+            if not is_boolean:
+                continue
+            
+            # Skip settable boolean capabilities that are buttons (handled by button platform)
+            # But include read-only boolean capabilities and settable ones that aren't buttons
+            if cap_data.get("setable"):
+                # Check if it's a button capability (button, gardena_button.*, etc.)
+                is_button = (
+                    capability_id == "button" or
+                    capability_id.startswith("button.") or
+                    capability_id.endswith("_button") or
+                    capability_id.startswith("gardena_button.")
+                )
+                if is_button:
                     continue
-                
-                # Check if it's a sub-capability of a known capability
-                if "." in capability_id:
-                    base_capability = capability_id.split(".")[0]
-                    # If base is known, use its config; otherwise create generic binary sensor
-                    if base_capability in CAPABILITY_TO_DEVICE_CLASS:
-                        entities.append(
-                            HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones)
-                        )
-                    else:
-                        # Unknown base capability - create generic binary sensor
-                        entities.append(
-                            HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones)
-                        )
-                else:
-                    # Unknown top-level capability - create generic binary sensor
-                    entities.append(
-                        HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones)
-                    )
+            
+            # Skip internal Homey maintenance capabilities
+            capability_lower = capability_id.lower()
+            if any(keyword in capability_lower for keyword in ["migrate", "reset", "identify"]):
+                _LOGGER.debug("Skipping internal Homey maintenance capability: %s", capability_id)
+                continue
+            
+            # Create binary sensor for this boolean capability
+            entities.append(
+                HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones)
+            )
 
     async_add_entities(entities)
 

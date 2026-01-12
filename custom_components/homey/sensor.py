@@ -168,6 +168,27 @@ CAPABILITY_TO_SENSOR = {
         "state_class": SensorStateClass.MEASUREMENT,
         "unit": "%",
     },
+    # Battery-specific capabilities
+    "measure_capacity": {
+        "device_class": SensorDeviceClass.ENERGY,  # Battery capacity in kWh
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": UnitOfEnergy.KILO_WATT_HOUR,
+    },
+    "measure_max_charging_power": {
+        "device_class": SensorDeviceClass.POWER,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": UnitOfPower.WATT,
+    },
+    "measure_max_discharging_power": {
+        "device_class": SensorDeviceClass.POWER,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": UnitOfPower.WATT,
+    },
+    "measure_emergency_power_reserve": {
+        "device_class": SensorDeviceClass.ENERGY,  # Emergency reserve in Wh/kWh
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": None,  # Will use unit from capability data (Wh or kWh)
+    },
     "measure_wind_speed": {  # Alternative name for wind_strength
         "device_class": None,
         "state_class": SensorStateClass.MEASUREMENT,
@@ -187,6 +208,38 @@ CAPABILITY_TO_SENSOR = {
         "device_class": SensorDeviceClass.ILLUMINANCE,
         "state_class": SensorStateClass.MEASUREMENT,
         "unit": "lx",
+    },
+    # Tibber price sensors
+    "measure_price_level": {
+        "device_class": None,  # Price level (low/normal/high)
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": None,  # Unitless - just a level indicator
+    },
+    "measure_price_info_level": {
+        "device_class": None,  # Price info level
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": None,  # Unitless
+    },
+    "measure_price_lowest": {
+        "device_class": None,  # Lowest price
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": None,  # Will be set from capability data (e.g., SEK/kWh)
+    },
+    "measure_price_highest": {
+        "device_class": None,  # Highest price
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": None,  # Will be set from capability data (e.g., SEK/kWh)
+    },
+    "measure_price_total": {
+        "device_class": None,  # Total price
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": None,  # Will be set from capability data (e.g., SEK/kWh)
+    },
+    # Tibber cost/energy sensors
+    "accumulatedCost": {
+        "device_class": None,  # Accumulated cost
+        "state_class": SensorStateClass.TOTAL_INCREASING,  # Cumulative cost
+        "unit": None,  # Will be set from capability data (e.g., SEK, ¤)
     },
 }
 
@@ -227,11 +280,20 @@ async def async_setup_entry(
             if capability_id in CAPABILITY_TO_SENSOR:
                 continue
             
+            # Skip enum-type capabilities - they should be select entities, not sensors
+            cap_data = capabilities.get(capability_id, {})
+            if cap_data.get("type") == "enum":
+                _LOGGER.debug("Skipping enum capability %s - should be handled by select platform", capability_id)
+                continue
+            
             # Check if this is a measure_* or meter_* capability (including sub-capabilities)
+            # Also handle vacuum-specific capabilities: clean_time, clean_area, clean_last, position_x, position_y
             is_measure = capability_id.startswith("measure_")
             is_meter = capability_id.startswith("meter_")
+            is_accumulated_cost = capability_id == "accumulatedCost"
+            is_vacuum_sensor = capability_id in ["clean_time", "clean_area", "clean_last", "position_x", "position_y"]
             
-            if is_measure or is_meter:
+            if is_measure or is_meter or is_accumulated_cost or is_vacuum_sensor:
                 # Skip internal Homey maintenance buttons (same logic as button.py)
                 capability_lower = capability_id.lower()
                 if any(keyword in capability_lower for keyword in ["migrate", "reset", "identify"]):
@@ -279,36 +341,266 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
         self._capability_id = capability_id
         self._api = api
 
-        # Handle sub-capabilities (e.g., measure_temperature.inside)
+        # Handle sub-capabilities (e.g., measure_temperature.inside, meter_power.imported)
         base_capability = capability_id.split(".")[0] if "." in capability_id else capability_id
         sensor_config = CAPABILITY_TO_SENSOR.get(base_capability)
         
         if not sensor_config:
             # Unknown capability - create generic sensor
-            _LOGGER.warning("Unknown sensor capability: %s for device %s", capability_id, device_id)
-            sensor_config = {
-                "device_class": None,
-                "state_class": SensorStateClass.MEASUREMENT,
-                "unit": None,
-            }
+            # This is expected behavior - we create sensors for all measure_* and meter_* capabilities
+            _LOGGER.debug("Creating generic sensor for unknown capability: %s for device %s", capability_id, device_id)
+            
+            # Special handling for meter_* sub-capabilities (e.g., meter_power.imported, meter_power.exported)
+            # These should be energy sensors for Energy dashboard compatibility
+            if base_capability == "meter_power":
+                sensor_config = {
+                    "device_class": SensorDeviceClass.ENERGY,
+                    "state_class": SensorStateClass.TOTAL_INCREASING,  # Cumulative energy
+                    "unit": UnitOfEnergy.KILO_WATT_HOUR,
+                }
+            else:
+                sensor_config = {
+                    "device_class": None,
+                    "state_class": SensorStateClass.MEASUREMENT,
+                    "unit": None,
+                }
         
         # Generate entity name - handle sub-capabilities
         if "." in capability_id:
             # Sub-capability: "measure_temperature.inside" -> "Inside Temperature"
             parts = capability_id.split(".")
-            base_name = parts[0].replace("measure_", "").replace("meter_", "").replace("_", " ").title()
+            base_cap = parts[0]
+            # Special handling: meter_power should be labeled as "Energy", not "Power"
+            if base_cap == "meter_power":
+                base_name = "Energy"
+            else:
+                base_name = base_cap.replace("measure_", "").replace("meter_", "").replace("_", " ").title()
             sub_name = parts[1].replace("_", " ").title()
             self._attr_name = f"{device.get('name', 'Unknown')} {sub_name} {base_name}"
         else:
             # Regular capability
-            self._attr_name = f"{device.get('name', 'Unknown')} {capability_id.replace('measure_', '').replace('meter_', '').replace('_', ' ').title()}"
+            # Special handling: meter_power should be labeled as "Energy", not "Power"
+            if capability_id == "meter_power":
+                display_name = "Energy"
+            else:
+                display_name = capability_id.replace("measure_", "").replace("meter_", "").replace("_", " ").title()
+            self._attr_name = f"{device.get('name', 'Unknown')} {display_name}"
         
         self._attr_unique_id = f"homey_{device_id}_{capability_id}"
         self._attr_device_class = sensor_config.get("device_class")
         self._attr_state_class = sensor_config.get("state_class")
-        self._attr_native_unit_of_measurement = sensor_config.get("unit")
+        
+        # Get unit from capability data if available (important for price sensors, etc.)
+        # This ensures sensors like Tibber price sensors get their units (e.g., SEK/kWh) from Homey
+        capabilities = device.get("capabilitiesObj", {})
+        capability_data = capabilities.get(capability_id, {})
+        unit_from_capability = capability_data.get("units")
+        
+        # Check if this is a price sensor that needs energy price format (currency/kWh)
+        is_price_sensor = capability_id in ["measure_price_total", "measure_price_lowest", "measure_price_highest"]
+        # Check if this is an accumulated cost sensor that needs currency code (not symbol)
+        is_accumulated_cost = capability_id == "accumulatedCost"
+        
+        # Use unit from capability data if available, otherwise use configured unit
+        if unit_from_capability:
+            if is_price_sensor:
+                # Convert currency symbol to currency code + /kWh format for Energy dashboard
+                unit_normalized = self._normalize_price_unit(unit_from_capability)
+                self._attr_native_unit_of_measurement = unit_normalized
+            elif is_accumulated_cost:
+                # Try to detect currency from other price sensors on the same device first
+                detected_currency = self._detect_currency_from_device(device, capabilities)
+                if detected_currency:
+                    # Use detected currency from price sensors
+                    self._attr_native_unit_of_measurement = detected_currency
+                else:
+                    # Only normalize if we have a specific currency symbol (not generic "¤")
+                    # If it's "¤" or unknown, leave unit empty so user can customize it
+                    if unit_from_capability and unit_from_capability.strip() != "¤":
+                        unit_normalized = self._normalize_currency_unit(unit_from_capability)
+                        # Only set if we got a valid currency code (not the generic fallback)
+                        if len(unit_normalized) == 3 and unit_normalized.isalpha() and unit_normalized.isupper():
+                            self._attr_native_unit_of_measurement = unit_normalized
+                        else:
+                            # Unknown currency, leave empty
+                            self._attr_native_unit_of_measurement = None
+                    else:
+                        # Generic currency symbol or no unit - leave empty for user customization
+                        self._attr_native_unit_of_measurement = None
+            elif self._attr_device_class == SensorDeviceClass.ENERGY:
+                # For energy sensors, ensure unit is compatible with Energy dashboard
+                # Accept kWh, Wh, or other energy units
+                unit_lower = unit_from_capability.lower()
+                if "kwh" in unit_lower:
+                    # Already in kWh - use as is
+                    self._attr_native_unit_of_measurement = unit_from_capability
+                elif "wh" in unit_lower and "kwh" not in unit_lower:
+                    # Wh (watt-hours) - use as is (Home Assistant supports Wh)
+                    self._attr_native_unit_of_measurement = unit_from_capability
+                elif base_capability == "meter_power":
+                    # meter_power.* defaults to kWh for Energy dashboard compatibility
+                    self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+                else:
+                    # Other energy sensors - use unit from capability
+                    self._attr_native_unit_of_measurement = unit_from_capability
+            else:
+                self._attr_native_unit_of_measurement = unit_from_capability
+        else:
+            self._attr_native_unit_of_measurement = sensor_config.get("unit")
 
         self._attr_device_info = get_device_info(device_id, device, zones)
+    
+    def _normalize_price_unit(self, unit: str) -> str:
+        """Normalize price sensor units to currency/kWh format for Home Assistant Energy dashboard.
+        
+        Converts currency symbols to currency codes and appends /kWh.
+        Examples:
+        - "¤" -> "SEK/kWh" (generic currency symbol, default to SEK)
+        - "€" -> "EUR/kWh"
+        - "$" -> "USD/kWh"
+        - "kr" -> "SEK/kWh" (Swedish/Norwegian/Danish krone)
+        - "SEK" -> "SEK/kWh" (already a code)
+        - "SEK/kWh" -> "SEK/kWh" (already formatted)
+        """
+        if not unit:
+            return "SEK/kWh"  # Default fallback
+        
+        unit = unit.strip()
+        
+        # If already in currency/kWh format, return as-is
+        if "/kWh" in unit or "/Wh" in unit:
+            return unit
+        
+        # Map currency symbols to currency codes
+        currency_map = {
+            "¤": "SEK",  # Generic currency symbol - default to SEK (common for Tibber users)
+            "€": "EUR",
+            "$": "USD",
+            "£": "GBP",
+            "¥": "JPY",
+            "kr": "SEK",  # Swedish/Norwegian/Danish krone
+            "SEK": "SEK",
+            "EUR": "EUR",
+            "USD": "USD",
+            "GBP": "GBP",
+            "NOK": "NOK",
+            "DKK": "DKK",
+        }
+        
+        # Convert symbol to code
+        currency_code = currency_map.get(unit, unit.upper())
+        
+        # Append /kWh for Energy dashboard compatibility
+        return f"{currency_code}/kWh"
+    
+    def _normalize_currency_unit(self, unit: str) -> str:
+        """Normalize currency units by converting symbols to currency codes.
+        
+        Converts currency symbols to currency codes for better display in Home Assistant.
+        Examples:
+        - "€" -> "EUR"
+        - "$" -> "USD"
+        - "kr" -> "SEK" (Swedish/Norwegian/Danish krone)
+        - "SEK" -> "SEK" (already a code)
+        
+        Note: Generic currency symbol "¤" is NOT normalized here - caller should handle it.
+        
+        Args:
+            unit: Currency unit string from Homey (symbol or code)
+            
+        Returns:
+            Currency code (e.g., "EUR", "USD", "SEK") or original unit if unknown
+        """
+        if not unit:
+            return unit
+        
+        unit = unit.strip()
+        
+        # Map currency symbols to currency codes (excluding generic "¤")
+        currency_map = {
+            "€": "EUR",
+            "$": "USD",
+            "£": "GBP",
+            "¥": "JPY",
+            "kr": "SEK",  # Swedish/Norwegian/Danish krone
+            "SEK": "SEK",
+            "EUR": "EUR",
+            "USD": "USD",
+            "GBP": "GBP",
+            "JPY": "JPY",
+            "CHF": "CHF",
+            "CAD": "CAD",
+            "AUD": "AUD",
+            "NZD": "NZD",
+            "DKK": "DKK",  # Danish krone
+            "NOK": "NOK",  # Norwegian krone
+            "PLN": "PLN",  # Polish zloty
+            "CZK": "CZK",  # Czech koruna
+            "HUF": "HUF",  # Hungarian forint
+            "RUB": "RUB",  # Russian ruble
+            "TRY": "TRY",  # Turkish lira
+            "BRL": "BRL",  # Brazilian real
+            "MXN": "MXN",  # Mexican peso
+            "ZAR": "ZAR",  # South African rand
+            "INR": "INR",  # Indian rupee
+            "CNY": "CNY",  # Chinese yuan
+        }
+        
+        # Check if the unit is a known currency symbol or code
+        if unit in currency_map:
+            return currency_map[unit]
+        
+        # If it's already a 3-letter uppercase code, assume it's valid
+        if len(unit) == 3 and unit.isalpha() and unit.isupper():
+            return unit
+        
+        # Fallback: try case-insensitive match
+        unit_upper = unit.upper()
+        for symbol, code in currency_map.items():
+            if symbol.upper() == unit_upper:
+                return code
+        
+        # Final fallback - return as-is if we can't determine
+        return unit
+    
+    def _detect_currency_from_device(self, device: dict[str, Any], capabilities: dict[str, Any]) -> str | None:
+        """Detect currency code from other price sensors on the same device.
+        
+        Looks for measure_price_* sensors on the same device and extracts the currency code
+        from their units (e.g., "SEK/kWh" -> "SEK").
+        
+        Args:
+            device: Device dictionary from Homey
+            capabilities: Capabilities dictionary from device
+            
+        Returns:
+            Currency code (e.g., "SEK", "EUR", "USD") if detected, None otherwise
+        """
+        # Check price sensors on the same device
+        price_sensor_ids = ["measure_price_total", "measure_price_lowest", "measure_price_highest"]
+        
+        for price_sensor_id in price_sensor_ids:
+            price_capability = capabilities.get(price_sensor_id)
+            if price_capability:
+                price_unit = price_capability.get("units")
+                if price_unit:
+                    # Extract currency code from price unit (e.g., "SEK/kWh" -> "SEK")
+                    if "/" in price_unit:
+                        currency_code = price_unit.split("/")[0].strip()
+                        # Validate it's a currency code (3 letters, uppercase)
+                        if len(currency_code) == 3 and currency_code.isalpha() and currency_code.isupper():
+                            return currency_code
+                    # If it's already a currency code without /kWh, use it
+                    elif len(price_unit) == 3 and price_unit.isalpha() and price_unit.isupper():
+                        return price_unit
+                    # Try to normalize it (might be a symbol)
+                    else:
+                        normalized = self._normalize_currency_unit(price_unit)
+                        # If normalization worked and returned a valid code, use it
+                        if len(normalized) == 3 and normalized.isalpha() and normalized.isupper():
+                            return normalized
+        
+        return None
 
     @property
     def native_value(self) -> float | None:
