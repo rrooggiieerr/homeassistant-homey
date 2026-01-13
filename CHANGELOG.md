@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.5-beta.4] - 2026-01-13
+
+### Added
+- **Socket.IO Real-Time Updates**: Full support for real-time device updates via Socket.IO
+  - Integration now uses Socket.IO for instant device state updates when available
+  - Device changes in Homey (via app, physical switches, or automations) appear in Home Assistant immediately (< 1 second)
+  - Socket.IO provides bidirectional communication for instant feedback on control commands
+  - Automatic fallback to polling (every 5 seconds) if Socket.IO connection fails or disconnects
+  - Seamless reconnection: Socket.IO automatically reconnects if connection is lost
+  - Connection status clearly logged: INFO when Socket.IO connects, WARNING when it disconnects and polling takes over
+  - Polling continues as backup even when Socket.IO is active, ensuring updates are never missed
+  - Works with both local Homey devices and self-hosted Homey servers
+
 ## [1.1.5-beta.3] - 2026-01-13
 
 ### Fixed

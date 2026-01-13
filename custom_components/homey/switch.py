@@ -34,7 +34,7 @@ async def async_setup_entry(
     # Filter devices if device_filter is configured
     from . import filter_devices
     devices = filter_devices(devices, entry.data.get("device_filter"))
-    
+
     _LOGGER.info("Checking %d devices for switch capabilities", len(devices))
 
     for device_id, device in devices.items():
@@ -72,14 +72,14 @@ async def async_setup_entry(
         if not onoff_capabilities:
             continue
         
-        # Skip if this device should be a light
-        has_light_capabilities = (
-            "dim" in capabilities
-            or "light_hue" in capabilities
-            or "light_temperature" in capabilities
-        )
-        # Skip if this device should be a fan
-        has_fan_capabilities = "fan_speed" in capabilities
+            # Skip if this device should be a light
+            has_light_capabilities = (
+                "dim" in capabilities
+                or "light_hue" in capabilities
+                or "light_temperature" in capabilities
+            )
+            # Skip if this device should be a fan
+            has_fan_capabilities = "fan_speed" in capabilities
         # Skip if this device should be a cover
         has_cover_capabilities = any(
             cap in capabilities for cap in ["windowcoverings_state", "windowcoverings_set", "garagedoor_closed"]
@@ -96,17 +96,17 @@ async def async_setup_entry(
             is_devicegroups_group 
             and device_class in ["socket", "switch"]
         )
-        
-        # Only create switch if it's not a specialized device type
+            
+            # Only create switch if it's not a specialized device type
         # Note: Having sensor capabilities (like measure_power) does NOT exclude switch creation
         # Devices can have both switch and sensor entities
         # Exception: devicegroups groups with class "socket" or "switch" should always be switches
         if is_devicegroups_switch or not (
-            has_light_capabilities
-            or has_fan_capabilities
-            or has_cover_capabilities
-            or has_media_capabilities
-        ):
+                has_light_capabilities
+                or has_fan_capabilities
+                or has_cover_capabilities
+                or has_media_capabilities
+            ):
             # Create switch entity for each onoff capability
             # For multi-channel devices, this creates multiple switch entities
             for onoff_cap in onoff_capabilities:

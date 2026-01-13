@@ -207,7 +207,7 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
             # Convert boolean to position: True (closed) = 0%, False (open) = 100%
             return 0 if is_closed else 100
         
-        return None
+            return None
 
     @property
     def is_closed(self) -> bool | None:
@@ -283,10 +283,10 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
             else:
                 # Numeric: get current position and set it again to stop
                 position = self.current_cover_position
-                if position is not None:
-                    await self._api.set_capability_value(
+        if position is not None:
+            await self._api.set_capability_value(
                         self._device_id, self._windowcoverings_cap, position / 100.0
-                    )
+            )
         # Immediately refresh this device's state for instant UI feedback
         await self.coordinator.async_refresh_device(self._device_id)
 
@@ -307,7 +307,7 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
             # Position > 50% = open (False), <= 50% = closed (True)
             await self._api.set_capability_value(
                 self._device_id, "garagedoor_closed", position <= 50
-            )
+        )
         # Immediately refresh this device's state for instant UI feedback
         await self.coordinator.async_refresh_device(self._device_id)
 
