@@ -206,6 +206,8 @@ class HomeyLight(CoordinatorEntity, LightEntity):
         # Determine color modes based on available capabilities
         # Priority: HS > COLOR_TEMP > BRIGHTNESS > ONOFF
         # Note: HS and COLOR_TEMP cannot be combined - if both are available, prefer HS
+        # IMPORTANT: If device has both dim and light_temperature, use COLOR_TEMP mode (not BRIGHTNESS)
+        # This ensures temperature control is available for White & Ambiance bulbs
         
         if has_hs:
             # Full HS color support (hue + saturation)
@@ -224,10 +226,12 @@ class HomeyLight(CoordinatorEntity, LightEntity):
         elif has_temp:
             # Color temperature support (White & Ambiance bulbs, CCT controllers)
             # COLOR_TEMP mode automatically includes brightness, so don't add BRIGHTNESS separately
+            # This applies even if device also has dim capability (e.g., White & Ambiance bulbs)
             color_modes.add(ColorMode.COLOR_TEMP)
-            _LOGGER.debug("Device %s (%s) supports COLOR_TEMP mode", device_id, device.get("name", "Unknown"))
+            _LOGGER.debug("Device %s (%s) supports COLOR_TEMP mode (has_temp=%s, has_dim=%s)", 
+                         device_id, device.get("name", "Unknown"), has_temp, has_dim)
         elif has_dim:
-            # Only dimming available (dimmable lights without color)
+            # Only dimming available (dimmable lights without color or temperature)
             color_modes.add(ColorMode.BRIGHTNESS)
             _LOGGER.debug("Device %s (%s) supports BRIGHTNESS mode only", device_id, device.get("name", "Unknown"))
         else:
