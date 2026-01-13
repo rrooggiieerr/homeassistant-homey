@@ -1035,3 +1035,13 @@ For support, please:
 ---
 
 **Note**: This is a community-driven project and is not officially affiliated with Athom or Home Assistant. It's a work in progress made by just one guy with too much time on his hands who couldn't sit on his ass waiting for someone else to create this plugin. If you find bugs, report them. If you want features, ask nicely. If you want to help, pull requests are welcome! 🚀
+
+---
+
+## Support the Project
+
+If you find this integration useful and want to support further development, you're welcome to buy me a coffee! ☕
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-%23FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/ifmike)
+
+No pressure at all - this is completely optional! Your support helps keep projects like this going and motivates me to add more features and fixes. 🙏
