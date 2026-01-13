@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.5-beta.2] - 2026-01-13
+
+### Fixed
+- **Roller Shutters as Select Entities**: Fixed roller shutters being incorrectly created as select entities instead of cover entities
+  - Excluded `windowcoverings_state` enum capability from select platform
+  - Roller shutters with enum-based `windowcoverings_state` (up/idle/down) now correctly appear as cover entities
+  - Resolves issue where roller shutters couldn't be controlled in Home Assistant
+- **Light Temperature Control**: Improved light temperature detection and logging
+  - Enhanced logging to help diagnose temperature control issues
+  - Clarified that COLOR_TEMP mode is used when `light_temperature` capability is present
+  - Ensures lights with temperature capability properly expose temperature control
+
+### Changed
+- **Polling Interval**: Reduced polling interval from 10 seconds to 5 seconds for better responsiveness
+  - Changes made via Homey app now appear in Home Assistant within 5 seconds (down from 10 seconds)
+  - Changes made via Home Assistant still update immediately
+- **Debug Logging**: Added debug logging for update timing to help diagnose delay issues
+  - Logs device update duration and refresh timing
+  - Helps identify performance bottlenecks
+
 ## [1.1.5-beta.1] - 2026-01-12
 
 ### Fixed
