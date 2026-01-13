@@ -687,8 +687,8 @@ For complete details on all supported capabilities, device classes, and entity t
 
 ### Socket.IO Real-time Updates
 - **Issue**: Real-time updates via Socket.IO are currently disabled due to authentication complexity.
-- **Impact**: Changes made outside Home Assistant (via Homey app or physical switches) may take up to 10 seconds to appear due to polling interval. However, changes made within Home Assistant update immediately (1-2 seconds).
-- **Solution**: This is a known limitation. The current approach provides immediate feedback for your actions while using efficient polling for external changes. Polling every 10 seconds with immediate refresh after commands provides a good balance of responsiveness and reliability.
+- **Impact**: Changes made outside Home Assistant (via Homey app or physical switches) may take up to 5 seconds to appear due to polling interval. However, changes made within Home Assistant update immediately (typically < 1 second).
+- **Solution**: This is a known limitation. The current approach provides immediate feedback for your actions while using efficient polling for external changes. Polling every 5 seconds with immediate refresh after commands provides a good balance of responsiveness and reliability. Socket.IO support is planned for future releases to enable true real-time updates.
 
 ---
 
@@ -763,16 +763,19 @@ If you see duplicate devices:
 
 If device states aren't updating:
 
-- The integration uses polling for updates (every 30 seconds by default)
-- Socket.IO support is planned for real-time updates
+- The integration uses polling for updates (every 5 seconds by default)
+- **Note**: Changes made via the Homey app may take up to 5 seconds to appear in Home Assistant
+- Changes made via Home Assistant are reflected immediately
+- Socket.IO support is planned for real-time updates (currently disabled due to complexity)
 - Check your network connectivity between Home Assistant and Homey
 - Check the logs for any connection errors
+- Enable debug logging to see update timing: `custom_components.homey: debug`
 
 ### Device Changes Not Syncing
 
 If device name or room changes made in Homey aren't appearing in Home Assistant:
 
-1. **Wait for Polling**: Changes are detected during the next polling cycle (up to 30 seconds)
+1. **Wait for Polling**: Changes are detected during the next polling cycle (up to 5 seconds)
 2. **Check Logs**: Look for messages about device registry updates in the logs
 3. **Manual Refresh**: Reload the integration: **Settings** → **Devices & Services** → **Homey** → **⋮** → **Reload**
 4. **Verify Changes**: Make sure the changes were actually saved in Homey
