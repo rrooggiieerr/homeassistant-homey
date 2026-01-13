@@ -4,7 +4,7 @@
 [![GitHub issues](https://img.shields.io/github/issues/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/issues)
 [![GitHub stars](https://img.shields.io/github/stars/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/stargazers)
 
-**Version**: 1.1.5-beta.1 | **Last Updated**: 2026-01-12 | [Changelog](CHANGELOG.md)
+**Version**: 1.1.5 | **Last Updated**: 2026-01-12 | [Changelog](CHANGELOG.md)
 
 A Homey integration for Home Assistant that automatically discovers and connects all your Homey devices, making them available natively in Home Assistant.
 
@@ -64,6 +64,7 @@ This Homey integration brings your [Homey](https://homey.app) hub into Home Assi
   - [Troubleshooting Updates](#troubleshooting-updates)
 - [Configuration](#configuration)
   - [Setup Steps](#setup-steps)
+  - [Homey Self Hosted Server Configuration](#homey-self-hosted-server-configuration)
 - [Usage](#usage)
   - [Devices](#devices)
   - [Homey Flows (Automations)](#homey-flows-automations)
@@ -497,6 +498,31 @@ After restarting, reload the integration to ensure all changes are applied:
 5. Click **Submit**
 
 The integration will automatically discover all your Homey devices and create entities in Home Assistant.
+
+### Homey Self Hosted Server Configuration
+
+If you're using **Homey Self Hosted Server (SHS)**, you need to specify the port number in the host address:
+
+**Host Format**: `IP_ADDRESS:PORT`
+
+**Example**: `192.168.1.100:4859`
+
+**Important Notes:**
+- **Default HTTP Port**: Homey Self Hosted Server uses port **4859** for HTTP connections
+- **Port Configuration**: The port can be configured via the `PORT_SERVER_HTTP` environment variable in your Docker setup
+- **Network Access**: Homey SHS runs in Docker with `network_mode: host` for direct LAN access
+- **Other Ports**: Additional ports include 4860 (HTTPS), 4861 and 4862 (Bridge servers), but the integration uses the HTTP port (4859) by default
+- **SSL Support**: If you're using HTTPS with a self-signed certificate, use `https://IP_ADDRESS:4860` format and the integration will automatically handle SSL certificate verification
+
+**Example Configuration:**
+- **Host**: `192.168.1.100:4859` (for HTTP)
+- **Host**: `https://192.168.1.100:4860` (for HTTPS with self-signed certificate)
+- **Token**: Your API Key from Homey
+
+**Troubleshooting:**
+- If you're having connection issues, verify the port number matches your Docker configuration
+- Check that your Home Assistant instance can reach the Homey SHS server on the specified port
+- For DNS resolution issues with `.local` hostnames, use the IP address directly instead
 
 ---
 
