@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.5-dev.6] - 2026-01-13
+
+### Fixed
+- **Indentation Errors**: Fixed multiple indentation errors across multiple platform files
+  - Fixed indentation in `binary_sensor.py` for entity creation and name assignment
+  - Fixed indentation in `button.py` for button entity creation
+  - Fixed indentation in `config_flow.py` for connector assignment
+  - Fixed indentation in `cover.py` for current_position property
+  - Fixed indentation in `device_info.py` for return statements
+  - Fixed indentation in `homey_api.py` for connector and return statements
+  - Fixed indentation in `sensor.py` for entity creation and unit assignment
+  - Fixed indentation in `switch.py` for capability checks
+  - Resolves potential `IndentationError` issues that could prevent the integration from loading
+
 ## [1.1.5-dev.3] - 2026-01-12
 
 ### Fixed

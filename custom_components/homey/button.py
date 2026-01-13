@@ -195,8 +195,8 @@ async def async_setup_entry(
                 
                 # Only add settable button capabilities
                 if capability_obj.get("setable"):
-                    entities.append(HomeyDeviceButton(coordinator, device_id, device, capability_id, api, zones))
-                    device_buttons_count += 1
+                entities.append(HomeyDeviceButton(coordinator, device_id, device, capability_id, api, zones))
+                device_buttons_count += 1
 
     if entities:
         _LOGGER.info(

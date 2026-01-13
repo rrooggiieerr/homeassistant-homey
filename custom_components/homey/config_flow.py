@@ -52,7 +52,7 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 # Detect if using HTTPS for SSL handling
                 use_https = host.startswith("https://")
-                
+
                 # Test connection - try multiple possible endpoints
                 # For HTTPS connections (self-hosted servers), we need SSL but disable verification for self-signed certs
                 # For HTTP connections (local Homey), disable SSL entirely
@@ -65,7 +65,7 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     connector = aiohttp.TCPConnector(ssl=ssl_context)
                 else:
                     # For HTTP: disable SSL entirely
-                    connector = aiohttp.TCPConnector(ssl=False)
+                connector = aiohttp.TCPConnector(ssl=False)
                 
                 # Try different possible endpoints based on Homey API documentation
                 endpoints_to_try = [

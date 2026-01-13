@@ -334,9 +334,9 @@ async def async_setup_entry(
                         )
                 else:
                     # Unknown top-level capability - create generic sensor
-                    entities.append(
-                        HomeySensor(coordinator, device_id, device, capability_id, api, zones)
-                    )
+                entities.append(
+                    HomeySensor(coordinator, device_id, device, capability_id, api, zones)
+                )
 
     async_add_entities(entities)
 
@@ -465,7 +465,7 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
             else:
                 self._attr_native_unit_of_measurement = unit_from_capability
         else:
-            self._attr_native_unit_of_measurement = sensor_config.get("unit")
+        self._attr_native_unit_of_measurement = sensor_config.get("unit")
 
         self._attr_device_info = get_device_info(device_id, device, zones)
     
