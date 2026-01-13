@@ -512,11 +512,11 @@ If you're using **Homey Self Hosted Server (SHS)**, you need to specify the port
 - **Port Configuration**: The port can be configured via the `PORT_SERVER_HTTP` environment variable in your Docker setup
 - **Network Access**: Homey SHS runs in Docker with `network_mode: host` for direct LAN access
 - **Other Ports**: Additional ports include 4860 (HTTPS), 4861 and 4862 (Bridge servers), but the integration uses the HTTP port (4859) by default
-- **SSL Support**: If you're using HTTPS with a self-signed certificate, use `https://IP_ADDRESS:4860` format and the integration will automatically handle SSL certificate verification
+- **SSL Support**: If you're using HTTPS with a self-signed certificate, use `https://IP_ADDRESS:4860` format and the integration will automatically handle SSL certificate verification *(Note: SSL support for self-signed certificates is currently only available in BETA version)*
 
 **Example Configuration:**
 - **Host**: `192.168.1.100:4859` (for HTTP)
-- **Host**: `https://192.168.1.100:4860` (for HTTPS with self-signed certificate)
+- **Host**: `https://192.168.1.100:4860` (for HTTPS with self-signed certificate - BETA only)
 - **Token**: Your API Key from Homey
 
 **Troubleshooting:**
