@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 import logging
+import time
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -27,7 +28,9 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     ) -> None:
         """Initialize the coordinator."""
         if update_interval is None:
-            update_interval = timedelta(seconds=10)  # Reduced from 30s to 10s for better responsiveness
+            update_interval = timedelta(seconds=5)  # Reduced from 10s to 5s for better responsiveness
+            # Note: Changes made via Homey app may take up to 5 seconds to appear in HA
+            # Socket.IO real-time updates are planned but not yet implemented
         
         super().__init__(
             hass,
@@ -45,13 +48,14 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Fetch data from Homey."""
+        update_start = time.time()
         try:
-            # Refresh zones periodically (every 10 updates = ~5 minutes)
+            # Refresh zones periodically (every 20 updates = ~100 seconds / ~1.7 minutes)
             if not hasattr(self, "_zone_update_count"):
                 self._zone_update_count = 0
             
             self._zone_update_count += 1
-            if self._zone_update_count >= 10:
+            if self._zone_update_count >= 20:
                 self.zones = await self.api.get_zones() or {}
                 self._zone_update_count = 0
                 _LOGGER.debug("Refreshed zones from Homey")
@@ -70,6 +74,9 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 await self._remove_deleted_devices(deleted_device_ids)
             
             self._previous_device_ids = current_device_ids
+            
+            update_duration = time.time() - update_start
+            _LOGGER.debug("Device update completed in %.2f seconds, fetched %d devices", update_duration, len(devices))
             
             return devices
         except Exception as err:
@@ -330,7 +337,11 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         
         This is called after setting a capability value to get immediate feedback
         instead of waiting for the next polling interval.
+        
+        Note: This only works for changes made via Home Assistant. Changes made via
+        the Homey app will only be detected during the next polling cycle (every 5 seconds).
         """
+        refresh_start = time.time()
         try:
             device_data = await self.api.get_device(device_id)
             if device_data and self.data:
@@ -338,7 +349,8 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 self.data[device_id] = device_data
                 # Notify listeners immediately
                 self.async_update_listeners()
-                _LOGGER.debug("Immediately refreshed device %s", device_id)
+                refresh_duration = time.time() - refresh_start
+                _LOGGER.debug("Immediately refreshed device %s in %.2f seconds", device_id, refresh_duration)
         except Exception as err:
             _LOGGER.debug("Error refreshing device %s: %s", device_id, err)
             # Fall back to regular refresh request
