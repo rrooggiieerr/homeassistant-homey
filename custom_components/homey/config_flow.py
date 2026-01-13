@@ -65,7 +65,7 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     connector = aiohttp.TCPConnector(ssl=ssl_context)
                 else:
                     # For HTTP: disable SSL entirely
-                connector = aiohttp.TCPConnector(ssl=False)
+                    connector = aiohttp.TCPConnector(ssl=False)
                 
                 # Try different possible endpoints based on Homey API documentation
                 endpoints_to_try = [

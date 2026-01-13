@@ -148,7 +148,7 @@ class HomeyBinarySensor(CoordinatorEntity, BinarySensorEntity):
             self._attr_name = f"{device.get('name', 'Unknown')} {sub_name} {base_name}"
         else:
             # Regular capability
-        self._attr_name = f"{device.get('name', 'Unknown')} {capability_id.replace('alarm_', '').replace('_', ' ').title()}"
+            self._attr_name = f"{device.get('name', 'Unknown')} {capability_id.replace('alarm_', '').replace('_', ' ').title()}"
         
         self._attr_unique_id = f"homey_{device_id}_{capability_id}"
         self._attr_device_class = CAPABILITY_TO_DEVICE_CLASS.get(base_capability)

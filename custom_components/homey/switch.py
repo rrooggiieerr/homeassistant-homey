@@ -80,15 +80,15 @@ async def async_setup_entry(
             )
             # Skip if this device should be a fan
             has_fan_capabilities = "fan_speed" in capabilities
-            # Skip if this device should be a cover
+        # Skip if this device should be a cover
         has_cover_capabilities = any(
             cap in capabilities for cap in ["windowcoverings_state", "windowcoverings_set", "garagedoor_closed"]
         )
-            # Skip if this device should be a media player
-            has_media_capabilities = any(
-                cap in capabilities
-                for cap in ["volume_set", "speaker_playing", "speaker_next"]
-            )
+        # Skip if this device should be a media player
+        has_media_capabilities = any(
+            cap in capabilities
+            for cap in ["volume_set", "speaker_playing", "speaker_next"]
+        )
         
         # Special handling for devicegroups groups: respect their class
         # If a group has class "socket" or "switch", treat it as a switch
@@ -174,7 +174,7 @@ class HomeySwitch(CoordinatorEntity, SwitchEntity):
         
         # Create unique ID based on capability
         if onoff_capability == "onoff":
-        self._attr_unique_id = f"homey_{device_id}_onoff"
+            self._attr_unique_id = f"homey_{device_id}_onoff"
         else:
             # Use capability ID in unique_id (e.g., "homey_{device_id}_onoff.output1")
             self._attr_unique_id = f"homey_{device_id}_{onoff_capability}"

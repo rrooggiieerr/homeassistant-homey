@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.5-dev.7] - 2026-01-13
+
+### Fixed
+- **Indentation Errors**: Fixed additional indentation errors across multiple platform files
+  - Fixed indentation in `device_info.py` for Shelly device detection return statement
+  - Fixed indentation in `cover.py` for garage door position handling and stop operation
+  - Fixed indentation in `sensor.py` for unit assignment
+  - Fixed indentation in `button.py` for button entity creation
+  - Fixed indentation in `homey_api.py` for return statement in windowcoverings_state handling
+  - All Python files now compile without syntax errors
+  - Resolves `IndentationError` issues that could prevent the integration from loading
+
 ## [1.1.5-dev.6] - 2026-01-13
 
 ### Fixed

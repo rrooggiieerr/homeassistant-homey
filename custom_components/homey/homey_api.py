@@ -58,7 +58,7 @@ class HomeyAPI:
             connector = aiohttp.TCPConnector(ssl=ssl_context)
         else:
             # For HTTP: disable SSL entirely
-        connector = aiohttp.TCPConnector(ssl=False)
+            connector = aiohttp.TCPConnector(ssl=False)
         self.session = aiohttp.ClientSession(
             connector=connector,
             headers={"Authorization": f"Bearer {self.token}"},
@@ -408,7 +408,7 @@ class HomeyAPI:
                 capability_id,
                 value[:50] if len(str(value)) > 50 else value,
             )
-                return None
+            return None
         
         # Handle numeric capabilities - reject non-numeric strings
         numeric_capabilities = [
