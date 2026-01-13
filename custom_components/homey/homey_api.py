@@ -1,6 +1,7 @@
 """Homey API client."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import ssl
 from collections.abc import Callable
@@ -37,12 +38,18 @@ class HomeyAPI:
         self.preferred_endpoint = preferred_endpoint  # "manager" or "v1"
         self.session: aiohttp.ClientSession | None = None
         self.sio: socketio.AsyncClient | None = None
+        self.homey_id: str | None = None  # Homey device ID for Socket.IO authentication
+        self.sio_namespace: str | None = None  # Namespace received from handshakeClient
         self.devices: dict[str, dict[str, Any]] = {}
         self.flows: dict[str, dict[str, Any]] = {}
         self.zones: dict[str, dict[str, Any]] = {}  # Rooms/zones
         self.scenes: dict[str, dict[str, Any]] = {}  # Scenes
         self.moods: dict[str, dict[str, Any]] = {}  # Moods
         self._listeners: list[Callable[[str, dict[str, Any]], None]] = []
+        self._sio_connected: bool = False
+        self._sio_reconnect_task: asyncio.Task | None = None
+        self._sio_reconnect_interval: int = 60  # Try to reconnect every 60 seconds
+        self._sio_last_reconnect_attempt: float = 0
 
     async def connect(self) -> None:
         """Connect to Homey API."""
@@ -65,12 +72,10 @@ class HomeyAPI:
             timeout=aiohttp.ClientTimeout(total=30),
         )
 
-        # Socket.IO is optional - we'll use polling if it's not available
-        # According to Homey API docs, Socket.IO requires handshakeClient event with session token
-        # This is complex to implement, so we'll skip it for now and use polling instead
-        # Real-time updates can be added later if needed
+        # Socket.IO connection will be established after authentication
+        # We need homeyId from system info first, so Socket.IO is initialized later
         self.sio = None
-        _LOGGER.debug("Socket.IO disabled - using polling for updates")
+        self._sio_connected = False
 
     async def authenticate(self) -> bool:
         """Authenticate with Homey API."""
@@ -92,7 +97,22 @@ class HomeyAPI:
                 async with self.session.get(f"{self.host}{endpoint}") as response:
                     if response.status == 200:
                         system_info = await response.json()
-                        _LOGGER.info("Connected to Homey: %s", system_info.get("name") or system_info.get("homeyName"))
+                        # Store homeyId for Socket.IO authentication
+                        # Try multiple possible fields: cloudId (from system.getInfo()), id, homeyId
+                        self.homey_id = (
+                            system_info.get("cloudId") or 
+                            system_info.get("id") or 
+                            system_info.get("homeyId")
+                        )
+                        _LOGGER.info("Connected to Homey: %s (ID: %s)", 
+                                   system_info.get("name") or system_info.get("homeyName") or system_info.get("hostname", "").split(".")[0],
+                                   self.homey_id or "unknown")
+                        # Attempt Socket.IO connection after successful authentication
+                        # This is non-blocking - if it fails, we'll use polling
+                        try:
+                            await self._connect_socketio()
+                        except Exception as err:
+                            _LOGGER.debug("Socket.IO connection attempt failed: %s - will use polling", err)
                         return True
                     elif response.status == 404:
                         _LOGGER.debug("Endpoint %s not found, trying next...", endpoint)
@@ -992,13 +1012,19 @@ class HomeyAPI:
         _LOGGER.error("Failed to disable flow %s", flow_id)
         return False
 
-    async def _on_device_update(self, data: dict[str, Any]) -> None:
-        """Handle device update from Socket.IO."""
-        device_id = data.get("id")
+    def _on_device_update(self, device_id: str, data: dict[str, Any]) -> None:
+        """Handle device update from Socket.IO or polling.
+        
+        Args:
+            device_id: Device ID
+            data: Device data dictionary
+        """
         if device_id:
             # Update local device cache
             if device_id in self.devices:
                 self.devices[device_id].update(data)
+            else:
+                self.devices[device_id] = data
             # Notify listeners
             for listener in self._listeners:
                 try:
@@ -1006,6 +1032,401 @@ class HomeyAPI:
                         listener(device_id, data)
                 except Exception as err:
                     _LOGGER.error("Error in device update listener: %s", err)
+
+    async def _connect_socketio(self) -> bool:
+        """Connect to Homey Socket.IO server for real-time updates.
+        
+        Returns True if Socket.IO connection is established, False otherwise.
+        Falls back to polling if Socket.IO fails.
+        """
+        # Note: homeyId might not be available for Local API (API Key) authentication
+        # We'll try to connect anyway - some Homey versions might accept just the token
+        if not self.homey_id:
+            _LOGGER.debug("homeyId not available from system endpoint - will try Socket.IO with token only")
+            # For Local API, we might be able to use just the token without homeyId
+            # Some Homey versions might accept empty/null homeyId
+        
+        if self._sio_connected and self.sio:
+            _LOGGER.debug("Socket.IO already connected")
+            return True
+        
+        try:
+            # Determine Socket.IO URL (same host as REST API)
+            # Socket.IO endpoint is typically /socket.io/ on the same host
+            sio_url = self.host.rstrip("/")
+            
+            # Detect SSL for Socket.IO
+            use_https = self.host.startswith("https://")
+            
+            # Create Socket.IO client with SSL configuration via aiohttp session
+            # python-socketio uses aiohttp under the hood, so SSL must be configured through aiohttp
+            # pingTimeout: 8000ms, pingInterval: 5000ms per Homey API docs
+            
+            # Create aiohttp connector with SSL configuration
+            if use_https:
+                # For HTTPS: create SSL context that doesn't verify certificates (for self-signed certs)
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+                connector = aiohttp.TCPConnector(ssl=ssl_context)
+            else:
+                # For HTTP: disable SSL entirely
+                connector = aiohttp.TCPConnector(ssl=False)
+            
+            # Create aiohttp session with the connector
+            http_session = aiohttp.ClientSession(connector=connector)
+            
+            # Create AsyncClient with the custom HTTP session
+            self.sio = socketio.AsyncClient(
+                http_session=http_session,
+                logger=_LOGGER,
+                engineio_logger=_LOGGER,
+            )
+            
+            # Set up event handlers before connecting
+            self.sio.on("connect", self._on_sio_connect)
+            self.sio.on("disconnect", self._on_sio_disconnect)
+            self.sio.on("connect_error", self._on_sio_connect_error)
+            
+            # Connect to Socket.IO server
+            _LOGGER.debug("Connecting to Socket.IO at %s", sio_url)
+            await self.sio.connect(
+                sio_url,
+                transports=["websocket"],  # Use websocket transport only
+                wait_timeout=10,  # Wait up to 10 seconds for connection
+            )
+            
+            # Wait a moment for connection to establish
+            # Note: wait() doesn't accept timeout parameter - connection is already established by connect()
+            # Just check if connected
+            await asyncio.sleep(0.5)  # Brief pause to ensure connection is fully established
+            
+            if not self.sio.connected:
+                _LOGGER.warning("Socket.IO connection failed - will use polling")
+                await self._disconnect_socketio()
+                return False
+            
+            # Authenticate with handshakeClient event
+            # This must happen after connection is established
+            auth_success = await self._authenticate_socketio()
+            if not auth_success:
+                _LOGGER.warning("Socket.IO authentication failed - will use polling")
+                await self._disconnect_socketio()
+                return False
+            
+            # Subscribe to device events
+            subscribe_success = await self._subscribe_device_events()
+            if not subscribe_success:
+                _LOGGER.warning("Socket.IO device subscription failed - will use polling")
+                await self._disconnect_socketio()
+                return False
+            
+            self._sio_connected = True
+            _LOGGER.info("Socket.IO connected successfully - real-time updates enabled")
+            # Stop any reconnection task since we're connected
+            self._stop_sio_reconnect_task()
+            return True
+            
+        except Exception as err:
+            _LOGGER.warning("Socket.IO connection error: %s - will use polling", err, exc_info=True)
+            await self._disconnect_socketio()
+            return False
+    
+    async def _authenticate_socketio(self) -> bool:
+        """Authenticate Socket.IO connection with handshakeClient event.
+        
+        Returns True if authentication successful, False otherwise.
+        """
+        if not self.sio or not self.sio.connected:
+            return False
+        
+        if not self.token:
+            _LOGGER.error("Cannot authenticate Socket.IO: missing token")
+            return False
+        
+        try:
+            # Emit handshakeClient event with token and homeyId
+            # According to Homey API docs, this returns a namespace (e.g., "/api")
+            # For Local API (API Key), homeyId might be optional - try with token only if homeyId unavailable
+            _LOGGER.debug("Authenticating Socket.IO with token (homeyId: %s)", self.homey_id or "not available")
+            
+            # Try using emit with callback first (more reliable)
+            auth_response = None
+            auth_event = asyncio.Event()
+            
+            def auth_callback(data: Any) -> None:
+                nonlocal auth_response
+                auth_response = data
+                auth_event.set()
+            
+            # Register callback for handshakeClient response
+            self.sio.on("handshakeClient", auth_callback)
+            
+            # Emit handshakeClient event
+            # For Local API, try with token only if homeyId is not available
+            handshake_data = {"token": self.token}
+            if self.homey_id:
+                handshake_data["homeyId"] = self.homey_id
+            
+            await self.sio.emit(
+                "handshakeClient",
+                handshake_data
+            )
+            
+            # Wait for response (with timeout)
+            try:
+                await asyncio.wait_for(auth_event.wait(), timeout=10)
+            except asyncio.TimeoutError:
+                _LOGGER.warning("Socket.IO authentication timeout")
+                return False
+            
+            # Remove callback
+            self.sio.off("handshakeClient", auth_callback)
+            
+            # Also try call() method as fallback
+            if not auth_response:
+                try:
+                    handshake_data = {"token": self.token}
+                    if self.homey_id:
+                        handshake_data["homeyId"] = self.homey_id
+                    auth_response = await self.sio.call(
+                        "handshakeClient",
+                        handshake_data,
+                        timeout=10
+                    )
+                except Exception:
+                    pass
+            
+            if auth_response:
+                # Response might be the namespace string directly, or a dict with namespace
+                if isinstance(auth_response, str):
+                    self.sio_namespace = auth_response
+                elif isinstance(auth_response, dict):
+                    self.sio_namespace = auth_response.get("namespace", "/api")
+                else:
+                    self.sio_namespace = "/api"  # Default namespace
+                
+                _LOGGER.debug("Socket.IO authenticated, namespace: %s", self.sio_namespace)
+                return True
+            else:
+                _LOGGER.warning("Socket.IO authentication failed: no response")
+                return False
+                
+        except Exception as err:
+            _LOGGER.warning("Socket.IO authentication error: %s", err, exc_info=True)
+            return False
+    
+    async def _subscribe_device_events(self) -> bool:
+        """Subscribe to device update events via Socket.IO.
+        
+        Returns True if subscription successful, False otherwise.
+        """
+        if not self.sio or not self.sio.connected:
+            return False
+        
+        try:
+            # Subscribe to all device events using homey:manager:device URI
+            # According to Homey API docs, we emit "subscribe" event with URI
+            _LOGGER.debug("Subscribing to device events via Socket.IO")
+            
+            # Subscribe to manager device events (all devices)
+            response = await self.sio.call(
+                "subscribe",
+                {"uri": "homey:manager:device"},
+                timeout=10
+            )
+            
+            if response:
+                _LOGGER.debug("Subscribed to device events, response: %s", response)
+                
+                # Set up event handlers for device updates
+                # Homey Socket.IO events may come in different formats:
+                # - "homey:manager:device" - direct manager events
+                # - "device" - generic device events
+                # - "device:update" or "device.update" - update events
+                # - Events might also come as data within a generic event
+                self.sio.on("homey:manager:device", self._on_sio_device_event)
+                self.sio.on("device", self._on_sio_device_event)
+                self.sio.on("device:update", self._on_sio_device_event)
+                self.sio.on("device.update", self._on_sio_device_event)
+                # Also listen for any event that might contain device data
+                self.sio.on("update", self._on_sio_device_event)
+                self.sio.on("message", self._on_sio_device_event)
+                
+                # Add a catch-all handler for debugging (will be removed in production if not needed)
+                # This helps us understand what events Homey actually sends
+                def debug_handler(event_name: str, *args: Any) -> None:
+                    if event_name not in ["connect", "disconnect", "connect_error"]:
+                        _LOGGER.debug("Socket.IO event received: %s with data: %s", event_name, args)
+                
+                # Note: python-socketio doesn't have a catch-all handler easily
+                # We'll rely on the specific handlers above
+                
+                return True
+            else:
+                _LOGGER.warning("Socket.IO device subscription failed: no response")
+                return False
+                
+        except Exception as err:
+            _LOGGER.warning("Socket.IO device subscription error: %s", err, exc_info=True)
+            return False
+    
+    def _on_sio_connect(self) -> None:
+        """Handle Socket.IO connection event."""
+        _LOGGER.info("Socket.IO connected to Homey")
+        self._sio_connected = True
+        # Stop reconnection task since we're connected
+        self._stop_sio_reconnect_task()
+    
+    def _on_sio_disconnect(self) -> None:
+        """Handle Socket.IO disconnection event."""
+        _LOGGER.warning("Socket.IO disconnected from Homey - will use polling until reconnection")
+        self._sio_connected = False
+        # Start reconnection task if not already running
+        self._start_sio_reconnect_task()
+    
+    def _on_sio_connect_error(self, data: Any) -> None:
+        """Handle Socket.IO connection error."""
+        _LOGGER.warning("Socket.IO connection error: %s - will use polling until reconnection", data)
+        self._sio_connected = False
+        # Start reconnection task if not already running
+        self._start_sio_reconnect_task()
+    
+    def _on_sio_device_event(self, *args: Any) -> None:
+        """Handle device update event from Socket.IO.
+        
+        Args:
+            *args: Variable arguments - could be (data,) or (event_name, data)
+        """
+        # Handle different call signatures
+        data = None
+        if args:
+            # If first arg is a string, it might be the event name
+            if len(args) == 1:
+                data = args[0]
+            elif len(args) >= 2:
+                # Event name, then data
+                data = args[1] if isinstance(args[1], dict) else args[0]
+            else:
+                data = args[0]
+        
+        if not data:
+            return
+        
+        # Data structure may vary - handle different formats
+        # Expected formats:
+        # 1. {"id": "device_id", ...device_data...} - direct device data
+        # 2. {"device": {"id": "device_id", ...}} - nested device format
+        # 3. {"deviceId": "device_id", ...} - alternative format
+        # 4. Array of devices: [{"id": "device_id", ...}, ...]
+        # 5. Event with URI and data: {"uri": "homey:manager:device:device_id", "data": {...}}
+        device_id = None
+        device_data = None
+        
+        if isinstance(data, dict):
+            # Check for URI-based format first
+            if "uri" in data and "data" in data:
+                uri = data.get("uri", "")
+                if "homey:manager:device" in uri:
+                    # Extract device ID from URI if present
+                    parts = uri.split(":")
+                    if len(parts) > 3:
+                        device_id = parts[-1]  # Last part is device ID
+                    device_data = data.get("data", {})
+                    if not device_id and "id" in device_data:
+                        device_id = device_data.get("id")
+            elif "id" in data:
+                # Direct device data format
+                device_id = data.get("id")
+                device_data = data
+            elif "device" in data:
+                # Nested device format
+                device = data.get("device", {})
+                device_id = device.get("id")
+                device_data = device
+            elif "deviceId" in data:
+                # Alternative format
+                device_id = data.get("deviceId")
+                device_data = data
+        elif isinstance(data, list) and len(data) > 0:
+            # Array of devices - process each one
+            for item in data:
+                if isinstance(item, dict) and "id" in item:
+                    self._on_device_update(item.get("id"), item)
+            return
+        
+        if device_id and device_data:
+            _LOGGER.debug("Received Socket.IO device update for device: %s", device_id)
+            # Call existing handler
+            self._on_device_update(device_id, device_data)
+        else:
+            _LOGGER.debug("Received Socket.IO device event with unexpected format: %s", data)
+    
+    def _start_sio_reconnect_task(self) -> None:
+        """Start background task to periodically attempt Socket.IO reconnection."""
+        # Only start if not already running and we have a session
+        if (self._sio_reconnect_task is None or self._sio_reconnect_task.done()) and self.session:
+            # Get the event loop - if we're in Home Assistant, use hass.loop
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    self._sio_reconnect_task = asyncio.create_task(self._sio_reconnect_loop())
+                    _LOGGER.debug("Started Socket.IO reconnection task")
+            except Exception as err:
+                _LOGGER.debug("Could not start Socket.IO reconnection task: %s", err)
+    
+    def _stop_sio_reconnect_task(self) -> None:
+        """Stop the Socket.IO reconnection task."""
+        if self._sio_reconnect_task and not self._sio_reconnect_task.done():
+            self._sio_reconnect_task.cancel()
+            _LOGGER.debug("Stopped Socket.IO reconnection task")
+        self._sio_reconnect_task = None
+    
+    async def _sio_reconnect_loop(self) -> None:
+        """Background loop to periodically attempt Socket.IO reconnection."""
+        import time
+        while True:
+            try:
+                # Wait before attempting reconnection
+                await asyncio.sleep(self._sio_reconnect_interval)
+                
+                # Only attempt if we're not already connected
+                if not self._sio_connected and self.session:
+                    _LOGGER.debug("Attempting Socket.IO reconnection...")
+                    try:
+                        success = await self._connect_socketio()
+                        if success:
+                            _LOGGER.info("Socket.IO reconnected successfully - real-time updates restored")
+                            return  # Exit loop since we're connected
+                        else:
+                            _LOGGER.debug("Socket.IO reconnection attempt failed, will retry in %d seconds", self._sio_reconnect_interval)
+                    except Exception as err:
+                        _LOGGER.debug("Socket.IO reconnection attempt error: %s - will retry in %d seconds", err, self._sio_reconnect_interval)
+                elif self._sio_connected:
+                    # Already connected, exit loop
+                    return
+            except asyncio.CancelledError:
+                # Task was cancelled, exit cleanly
+                return
+            except Exception as err:
+                _LOGGER.debug("Error in Socket.IO reconnection loop: %s", err)
+                # Continue loop even on error
+    
+    async def _disconnect_socketio(self) -> None:
+        """Disconnect Socket.IO client."""
+        # Stop reconnection task
+        self._stop_sio_reconnect_task()
+        
+        if self.sio:
+            try:
+                if self.sio.connected:
+                    await self.sio.disconnect()
+            except Exception as err:
+                _LOGGER.debug("Error disconnecting Socket.IO: %s", err)
+            finally:
+                self.sio = None
+                self._sio_connected = False
+                self.sio_namespace = None
 
     def add_device_listener(self, listener: Callable[[str, dict[str, Any]], None]) -> None:
         """Add a listener for device updates."""
@@ -1018,9 +1439,10 @@ class HomeyAPI:
 
     async def disconnect(self) -> None:
         """Disconnect from Homey API."""
-        if self.sio:
-            await self.sio.disconnect()
-            self.sio = None
+        # Stop reconnection task
+        self._stop_sio_reconnect_task()
+        
+        await self._disconnect_socketio()
 
         if self.session:
             await self.session.close()

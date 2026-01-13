@@ -72,14 +72,14 @@ async def async_setup_entry(
         if not onoff_capabilities:
             continue
         
-            # Skip if this device should be a light
-            has_light_capabilities = (
-                "dim" in capabilities
-                or "light_hue" in capabilities
-                or "light_temperature" in capabilities
-            )
-            # Skip if this device should be a fan
-            has_fan_capabilities = "fan_speed" in capabilities
+        # Skip if this device should be a light
+        has_light_capabilities = (
+            "dim" in capabilities
+            or "light_hue" in capabilities
+            or "light_temperature" in capabilities
+        )
+        # Skip if this device should be a fan
+        has_fan_capabilities = "fan_speed" in capabilities
         # Skip if this device should be a cover
         has_cover_capabilities = any(
             cap in capabilities for cap in ["windowcoverings_state", "windowcoverings_set", "garagedoor_closed"]

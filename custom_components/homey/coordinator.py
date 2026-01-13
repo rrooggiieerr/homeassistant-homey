@@ -29,8 +29,9 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Initialize the coordinator."""
         if update_interval is None:
             update_interval = timedelta(seconds=5)  # Reduced from 10s to 5s for better responsiveness
-            # Note: Changes made via Homey app may take up to 5 seconds to appear in HA
-            # Socket.IO real-time updates are planned but not yet implemented
+            # Note: Socket.IO real-time updates are enabled if available
+            # If Socket.IO fails, polling will be used as fallback
+            # Changes made via Homey app will appear immediately via Socket.IO, or within 5 seconds via polling
         
         super().__init__(
             hass,
@@ -47,7 +48,12 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self.api.add_device_listener(self._on_device_update)
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
-        """Fetch data from Homey."""
+        """Fetch data from Homey.
+        
+        Note: This method always uses polling. If Socket.IO is connected, it will
+        provide real-time updates via the listener system, but polling continues
+        as a fallback to ensure data consistency.
+        """
         update_start = time.time()
         try:
             # Refresh zones periodically (every 20 updates = ~100 seconds / ~1.7 minutes)
@@ -59,6 +65,12 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 self.zones = await self.api.get_zones() or {}
                 self._zone_update_count = 0
                 _LOGGER.debug("Refreshed zones from Homey")
+            
+            # Attempt Socket.IO reconnection if disconnected (non-blocking check)
+            # This ensures we try to restore real-time updates periodically
+            if hasattr(self.api, '_sio_connected') and not self.api._sio_connected:
+                # Trigger reconnection attempt (will happen in background)
+                self.api._start_sio_reconnect_task()
             
             devices = await self.api.get_devices()
             

@@ -124,8 +124,11 @@ Before installing the integration, you need to create an API Key in Homey:
    - **Start Flows** (`homey.flow.start`) - **Recommended** to trigger, enable, and disable Flows
    - **View Moods** (`homey.mood.readonly`) - **Recommended** to list Moods (needed for Mood entities)
    - **Set Moods** (`homey.mood.set`) - **Recommended** to trigger Moods
+   - **System Info** (`homey.system.readonly` or similar) - **Optional** for Socket.IO real-time updates. If this permission is missing, the integration will use polling instead (5-second updates). Socket.IO requires access to system info to get the Homey device ID.
    
    **Note on Scenes**: Scenes in Homey API v3 may not have separate permissions. Scene listing and activation likely use `homey.device.readonly` and `homey.device.control` permissions.
+   
+   **Note on Socket.IO**: Real-time updates via Socket.IO require access to the system info endpoint. If your API key doesn't have the necessary system permissions, the integration will automatically fall back to polling (updates every 5 seconds). This is perfectly fine for most use cases, but Socket.IO provides instant updates when available.
 
 6. Copy the API Key (you won't be able to see it again!)
 
@@ -140,6 +143,7 @@ Before installing the integration, you need to create an API Key in Homey:
 | `homey.flow.start` | ⚠️ **Flow control disabled** - Cannot trigger, enable, or disable flows |
 | `homey.mood.readonly` | ⚠️ **Mood listing disabled** - Mood entities won't be created |
 | `homey.mood.set` | ⚠️ **Mood activation disabled** - Cannot activate moods |
+| `homey.system.readonly` (or similar) | ⚠️ **Socket.IO disabled** - Real-time updates via Socket.IO won't work, will use polling (5-second updates) instead |
 
 **Note**: The integration will log warnings in Home Assistant's logs when permissions are missing, but it won't break. Features requiring missing permissions will simply be disabled.
 
