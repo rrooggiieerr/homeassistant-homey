@@ -861,9 +861,11 @@ If you see duplicate devices:
 If device states aren't updating in real-time:
 
 1. **Check API Key Permissions**:
-   - Go to **Homey Settings → API Keys** and edit your existing API key
+   - Go to **Homey Settings → API Keys** and create a new API key
    - Ensure **System → View System** (`homey.system.readonly`) permission is enabled
-   - After updating permissions, restart Home Assistant or reload the Homey integration
+   - Make sure to enable all the same permissions as your current API key, plus the new `homey.system.readonly` permission
+   - After creating the new API key, update your Home Assistant integration configuration with the new key
+   - Restart Home Assistant or reload the Homey integration
 
 2. **Check Socket.IO Connection Status**:
    - Go to **Settings** → **System** → **Logs**
