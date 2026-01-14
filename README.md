@@ -775,7 +775,7 @@ For complete details on all supported capabilities, device classes, and entity t
 ### Room/Zone Detection
 - **Issue**: Rooms may not be detected if your API key doesn't have **View Zones** permission.
 - **Impact**: Devices will still be imported and work correctly, but won't be organized by rooms in the device selection dialog or assigned to areas automatically.
-- **Solution**: Add **View Zones** permission to your API key in Homey Settings → API Keys → Edit your API key.
+- **Solution**: Create a new API key in Homey Settings → API Keys with the **View Zones** permission enabled.
 
 ### Config Flow Window Size
 - **Issue**: The device selection dialog has a fixed size and cannot be resized or customized.
