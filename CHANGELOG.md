@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.5-dev.9] - 2026-01-14
+
+### 🚀 Major Real-Time Updates Release
+
+**This is a significant update that transforms the integration from polling-based to real-time event-driven updates. Device state changes in Homey now appear in Home Assistant instantly (< 1 second) instead of waiting for the next poll cycle (previously 10 seconds). This provides a truly responsive smart home experience where actions taken in Homey (via app, physical switches, or automations) are immediately reflected in Home Assistant's UI.**
+
+**⚠️ IMPORTANT: API Key Requirement**
+- **This feature requires an updated API key with the `homey.system.readonly` permission enabled**
+- Go to **Homey Settings → API Keys** and edit your API key
+- Enable the **System → View System** permission (`homey.system.readonly`)
+- Without this permission, Socket.IO real-time updates will not work and the integration will fall back to polling
+- The integration will continue to work with polling if the permission is missing, but you won't get instant updates
+
+**What This Really Means:**
+- **Before**: When you turned on a light in Homey, Home Assistant would show the old state until the next poll (up to 10 seconds later)
+- **After**: When you turn on a light in Homey, Home Assistant updates instantly (< 1 second) - the UI reflects reality in real-time
+- **Bidirectional**: Commands sent from Home Assistant to Homey also get instant feedback, so you see the result immediately
+- **Seamless**: If Socket.IO connection fails, the integration automatically falls back to polling (5-10 seconds) - you never lose updates
+- **Efficient**: When Socket.IO is active, polling reduces to 60 seconds (safety net), saving API calls while maintaining reliability
+
 ## [1.1.5-dev.8] - 2026-01-13
 
 ### Added
@@ -648,4 +668,4 @@ When making changes:
 
 ---
 
-**Last Updated**: 2026-01-08
+**Last Updated**: 2026-01-14
