@@ -131,6 +131,7 @@ Before installing the integration, you need to create an API Key in Homey:
    **Required Permissions:**
    - **View devices** (`homey.device.readonly`) - **Required** to read device states and discover devices
    - **Control devices** (`homey.device.control`) - **Required** to control devices (turn on/off, set brightness, etc.)
+   - **View System** (`homey.system.readonly`) - **Required** for Socket.IO real-time updates. Without this, the integration will use polling (5-10 second updates) instead of instant updates (< 1 second). See [Real-Time Updates](#real-time-updates) section below.
    
    **Recommended Permissions:**
    - **View Zones** (`homey.zone.readonly`) - **Recommended** for room/area organization. Without this, devices won't be organized by Homey rooms.
@@ -138,7 +139,6 @@ Before installing the integration, you need to create an API Key in Homey:
    - **Start Flows** (`homey.flow.start`) - **Recommended** to trigger, enable, and disable Flows
    - **View Moods** (`homey.mood.readonly`) - **Recommended** to list Moods (needed for Mood entities)
    - **Set Moods** (`homey.mood.set`) - **Recommended** to trigger Moods
-   - **View System** (`homey.system.readonly`) - **Recommended** for Socket.IO real-time updates. Without this, the integration will use polling (5-10 second updates) instead of instant updates (< 1 second). See [Real-Time Updates](#real-time-updates) section below.
    
    **Note on Scenes**: Scenes in Homey API v3 may not have separate permissions. Scene listing and activation likely use `homey.device.readonly` and `homey.device.control` permissions.
 
@@ -150,16 +150,16 @@ Before installing the integration, you need to create an API Key in Homey:
 |-----------|-------------------|
 | `homey.device.readonly` | ❌ **Integration will not work** - Cannot discover or read devices |
 | `homey.device.control` | ⚠️ **Device control disabled** - Cannot turn devices on/off, change settings, etc. |
+| `homey.system.readonly` | ⚠️ **Socket.IO disabled** - Real-time updates via Socket.IO won't work, will use polling (5-10 second updates) instead |
 | `homey.zone.readonly` | ⚠️ **No room organization** - Devices won't be grouped by Homey rooms/areas |
 | `homey.flow.readonly` | ⚠️ **Flow listing disabled** - Flow button entities won't be created |
 | `homey.flow.start` | ⚠️ **Flow control disabled** - Cannot trigger, enable, or disable flows |
 | `homey.mood.readonly` | ⚠️ **Mood listing disabled** - Mood entities won't be created |
 | `homey.mood.set` | ⚠️ **Mood activation disabled** - Cannot activate moods |
-| `homey.system.readonly` | ⚠️ **Socket.IO disabled** - Real-time updates via Socket.IO won't work, will use polling (5-10 second updates) instead |
 
-**Note**: The integration will log warnings in Home Assistant's logs when permissions are missing, but it won't break. Features requiring missing permissions will simply be disabled.
+**Note**: The integration will log warnings in Home Assistant's logs when permissions are missing, but it won't break. Features requiring missing permissions will simply be disabled. However, `homey.system.readonly` is **required** for Socket.IO real-time updates - without it, the integration will use polling (5-10 second updates) instead of instant updates (< 1 second).
 
-**⚠️ Important for Real-Time Updates**: To enable Socket.IO real-time updates (instant state synchronization), you need to **edit your API key** and enable the **System → View System** permission (`homey.system.readonly`). Go to Homey Settings → API Keys and edit your API key to enable this permission. After updating the permissions, restart Home Assistant or reload the Homey integration.
+**⚠️ Important for Real-Time Updates**: The **System → View System** permission (`homey.system.readonly`) is **required** for Socket.IO real-time updates. If you're setting up a new API key, make sure to enable this permission. If you're using an existing API key, **edit your API key** in Homey Settings → API Keys and enable this permission. After updating the permissions, restart Home Assistant or reload the Homey integration.
 
 **Important**: Keep this API Key safe - you'll need it during the setup process!
 
