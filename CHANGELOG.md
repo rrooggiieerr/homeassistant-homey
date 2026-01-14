@@ -9,7 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.5-beta.4] - 2026-01-13
+## [1.1.5-dev.9] - 2026-01-14
+
+### 🚀 Major Real-Time Updates Release
+
+**This is a significant update that transforms the integration from polling-based to real-time event-driven updates. Device state changes in Homey now appear in Home Assistant instantly (< 1 second) instead of waiting for the next poll cycle (previously 10 seconds). This provides a truly responsive smart home experience where actions taken in Homey (via app, physical switches, or automations) are immediately reflected in Home Assistant's UI.**
+
+**⚠️ IMPORTANT: API Key Requirement**
+- **This feature requires updating your existing API key with the `homey.system.readonly` permission enabled**
+- Go to **Homey Settings → API Keys** and **edit your existing API key** (you don't need to create a new one)
+- Enable the **System → View System** permission (`homey.system.readonly`)
+- After updating the API key permissions, restart Home Assistant or reload the Homey integration
+- Without this permission, Socket.IO real-time updates will not work and the integration will fall back to polling
+- The integration will continue to work with polling if the permission is missing, but you won't get instant updates
+
+**What This Really Means:**
+- **Before**: When you turned on a light in Homey, Home Assistant would show the old state until the next poll (up to 10 seconds later)
+- **After**: When you turn on a light in Homey, Home Assistant updates instantly (< 1 second) - the UI reflects reality in real-time
+- **Bidirectional**: Commands sent from Home Assistant to Homey also get instant feedback, so you see the result immediately
+- **Seamless**: If Socket.IO connection fails, the integration automatically falls back to polling (5-10 seconds) - you never lose updates
+- **Efficient**: When Socket.IO is active, polling reduces to 60 seconds (safety net), saving API calls while maintaining reliability
+
+## [1.1.5-dev.8] - 2026-01-13
 
 ### Added
 - **Socket.IO Real-Time Updates**: Full support for real-time device updates via Socket.IO
@@ -22,36 +43,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Polling continues as backup even when Socket.IO is active, ensuring updates are never missed
   - Works with both local Homey devices and self-hosted Homey servers
 
-## [1.1.5-beta.3] - 2026-01-13
+## [1.1.5-dev.7] - 2026-01-13
 
 ### Fixed
-- **Indentation Errors**: Fixed multiple indentation errors in `device_info.py` that prevented the integration from loading
-  - Fixed `return "light"` statement indentation (line 69)
-  - Fixed Philips Hue detection `if` statement indentation (line 127)
-  - Fixed Shelly detection `return "switch"` statement indentation (line 143)
-  - Resolves `IndentationError: expected an indented block after 'if' statement` and "setup error, import error" issues
+- **Indentation Errors**: Fixed additional indentation errors across multiple platform files
+  - Fixed indentation in `device_info.py` for Shelly device detection return statement
+  - Fixed indentation in `cover.py` for garage door position handling and stop operation
+  - Fixed indentation in `sensor.py` for unit assignment
+  - Fixed indentation in `button.py` for button entity creation
+  - Fixed indentation in `homey_api.py` for return statement in windowcoverings_state handling
+  - All Python files now compile without syntax errors
+  - Resolves `IndentationError` issues that could prevent the integration from loading
 
-## [1.1.5-beta.2] - 2026-01-13
+## [1.1.5-dev.6] - 2026-01-13
 
 ### Fixed
-- **Roller Shutters as Select Entities**: Fixed roller shutters being incorrectly created as select entities instead of cover entities
-  - Excluded `windowcoverings_state` enum capability from select platform
-  - Roller shutters with enum-based `windowcoverings_state` (up/idle/down) now correctly appear as cover entities
-  - Resolves issue where roller shutters couldn't be controlled in Home Assistant
-- **Light Temperature Control**: Improved light temperature detection and logging
-  - Enhanced logging to help diagnose temperature control issues
-  - Clarified that COLOR_TEMP mode is used when `light_temperature` capability is present
-  - Ensures lights with temperature capability properly expose temperature control
+- **Indentation Errors**: Fixed multiple indentation errors across multiple platform files
+  - Fixed indentation in `binary_sensor.py` for entity creation and name assignment
+  - Fixed indentation in `button.py` for button entity creation
+  - Fixed indentation in `config_flow.py` for connector assignment
+  - Fixed indentation in `cover.py` for current_position property
+  - Fixed indentation in `device_info.py` for return statements
+  - Fixed indentation in `homey_api.py` for connector and return statements
+  - Fixed indentation in `sensor.py` for entity creation and unit assignment
+  - Fixed indentation in `switch.py` for capability checks
+  - Resolves potential `IndentationError` issues that could prevent the integration from loading
 
-### Changed
-- **Polling Interval**: Reduced polling interval from 10 seconds to 5 seconds for better responsiveness
-  - Changes made via Homey app now appear in Home Assistant within 5 seconds (down from 10 seconds)
-  - Changes made via Home Assistant still update immediately
-- **Debug Logging**: Added debug logging for update timing to help diagnose delay issues
-  - Logs device update duration and refresh timing
-  - Helps identify performance bottlenecks
-
-## [1.1.5-beta.1] - 2026-01-12
+## [1.1.5-dev.3] - 2026-01-12
 
 ### Fixed
 - **Self-Hosted Server SSL Support**: Fixed SSL handling for Homey Self-Hosted Server users
@@ -61,11 +79,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - HTTP connections (local Homey devices) continue to work as before
   - Users can now use `https://` URLs for self-hosted servers without connection errors
   - Port numbers in URLs are preserved (e.g., `https://homey.example.com:8443`)
+
+## [1.1.5-dev.2] - 2026-01-12
+
+### Fixed
 - **Indentation Errors**: Fixed multiple indentation errors in `device_info.py` that prevented the integration from loading
   - Fixed `return "light"` statement indentation (line 69)
   - Fixed Philips Hue detection `if` statement indentation (line 127)
   - Fixed Shelly detection `return "switch"` statement indentation (line 143)
   - Resolves `IndentationError: expected an indented block after 'if' statement`
+
+## [1.1.4-dev.17] - 2026-01-12
+
+### Fixed
+- **Indentation Errors**: Fixed multiple indentation errors in `device_info.py` that prevented the integration from loading
+  - Fixed `return "light"` statement indentation (line 69)
+  - Fixed Philips Hue detection `if` statement indentation (line 127)
+  - Fixed Shelly detection `return "switch"` statement indentation (line 143)
+  - Resolves `IndentationError: expected an indented block after 'if' statement`
+
+## [1.1.4-dev.16] - 2026-01-12
 
 ### Added
 - **Devicegroups Plugin Support**: Full support for Homey devicegroups plugin groups
@@ -79,35 +112,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added comprehensive debug logging to help identify when groups are detected
   - Groups work with any class type and are handled based on their capabilities and class
 
-## [1.1.4-beta.5] - 2026-01-12
+## [1.1.4-dev.15] - 2026-01-12
 
 ### Fixed
-- **Self-Hosted Server SSL Support**: Fixed SSL handling for Homey Self-Hosted Server users
-  - Previously, the integration always disabled SSL (`ssl=False`), causing HTTPS connections to fail
-  - Now properly detects HTTPS URLs and creates appropriate SSL context
-  - SSL certificate verification is disabled for self-signed certificates (common on self-hosted servers)
-  - HTTP connections (local Homey devices) continue to work as before
-  - Users can now use `https://` URLs for self-hosted servers without connection errors
-  - Port numbers in URLs are preserved (e.g., `https://homey.example.com:8443`)
-- **Indentation Errors**: Fixed multiple indentation errors in `device_info.py` that prevented the integration from loading
-  - Fixed `return "light"` statement indentation (line 69)
-  - Fixed Philips Hue detection `if` statement indentation (line 127)
-  - Fixed Shelly detection `return "switch"` statement indentation (line 143)
-  - Resolves `IndentationError: expected an indented block after 'if' statement`
+- **Enum-Based Windowcoverings API Validation**: Fixed API validation to accept enum string values ("up", "idle", "down") for `windowcoverings_state`
+  - Previously, the API validation rejected enum strings because it expected numeric values
+  - Now correctly handles both enum-based and numeric `windowcoverings_state` capabilities
+  - Enum-based covers can now be controlled properly (open/close/stop actions work)
+  - Numeric windowcoverings_state devices continue to work as before
+  - Fixes error: "Invalid numeric value for capability windowcoverings_state: up (appears to be a string, not a number)"
 
-### Added
-- **Devicegroups Plugin Support**: Full support for Homey devicegroups plugin groups
-  - Groups are now detected and handled correctly regardless of their class type
-  - Groups with `class: "light"` create light entities (even with minimal capabilities)
-  - Groups with `class: "fan"` create fan entities (even without `fan_speed`)
-  - Groups with `class: "socket"` or `"switch"` create switch entities
-  - Groups with `class: "heater"` or `"thermostat"` create climate entities (even without `target_temperature`)
-  - Groups with cover-related classes (`windowcoverings`, `cover`, `curtain`, etc.) create cover entities
-  - Groups are identified by `driverId` pattern: `homey:app:com.swttt.devicegroups:*`
-  - Added comprehensive debug logging to help identify when groups are detected
-  - Groups work with any class type and are handled based on their capabilities and class
-
-## [1.1.4-beta.4] - 2026-01-12
+## [1.1.4-dev.14] - 2026-01-12
 
 ### Fixed
 - **Vacuum Entity Compatibility**: Fixed vacuum entity to work with Home Assistant 2026.1
@@ -654,4 +669,4 @@ When making changes:
 
 ---
 
-**Last Updated**: 2026-01-08
+**Last Updated**: 2026-01-14

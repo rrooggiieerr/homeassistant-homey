@@ -23,7 +23,7 @@ _LOGGER = logging.getLogger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_HOST, default="http://homey.local"): str,
+        vol.Required(CONF_HOST, default="192.168.1.100"): str,
         vol.Required(CONF_TOKEN): str,
     }
 )
