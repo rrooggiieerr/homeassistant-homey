@@ -159,7 +159,7 @@ Before installing the integration, you need to create an API Key in Homey:
 
 **Note**: The integration will log warnings in Home Assistant's logs when permissions are missing, but it won't break. Features requiring missing permissions will simply be disabled.
 
-**⚠️ Important for Real-Time Updates**: To enable Socket.IO real-time updates (instant state synchronization), you need to **create a new API key** with the **System → View System** permission (`homey.system.readonly`) enabled. Go to Homey Settings → API Keys and create a new API key with this permission. Make sure to enable all the same permissions as your current API key, plus the new `homey.system.readonly` permission. After creating the new API key, update your Home Assistant integration configuration with the new key and restart Home Assistant or reload the Homey integration.
+**⚠️ Important for Real-Time Updates**: To enable Socket.IO real-time updates (instant state synchronization), you need to **edit your API key** and enable the **System → View System** permission (`homey.system.readonly`). Go to Homey Settings → API Keys and edit your API key to enable this permission. After updating the permissions, restart Home Assistant or reload the Homey integration.
 
 **Important**: Keep this API Key safe - you'll need it during the setup process!
 
@@ -709,16 +709,13 @@ The integration supports real-time device state updates via Socket.IO, providing
 
 To enable Socket.IO real-time updates:
 
-1. **Create a New API Key**:
+1. **Edit Your API Key**:
    - Go to **Homey Settings → API Keys**
-   - **Create a new API key** with the **System → View System** permission (`homey.system.readonly`) enabled
-   - Make sure to enable all the same permissions as your current API key, plus the new `homey.system.readonly` permission
+   - **Edit your API key** and enable the **System → View System** permission (`homey.system.readonly`)
 
-2. **Update Integration Configuration**:
-   - After creating the new API key, update your Home Assistant integration configuration with the new key
-   - Go to **Settings** → **Devices & Services** → **Homey** → **Configure**
-   - Enter the new API key
-   - Restart Home Assistant or reload the Homey integration
+2. **Restart or Reload**:
+   - After updating the API key permissions, restart Home Assistant or reload the Homey integration
+   - Go to **Settings** → **Devices & Services** → **Homey** → **⋮** → **Reload**
 
 3. **Verify Connection**:
    - Check Home Assistant logs for "Socket.IO real-time updates enabled" message
@@ -861,11 +858,9 @@ If you see duplicate devices:
 If device states aren't updating in real-time:
 
 1. **Check API Key Permissions**:
-   - Go to **Homey Settings → API Keys** and create a new API key
+   - Go to **Homey Settings → API Keys** and edit your API key
    - Ensure **System → View System** (`homey.system.readonly`) permission is enabled
-   - Make sure to enable all the same permissions as your current API key, plus the new `homey.system.readonly` permission
-   - After creating the new API key, update your Home Assistant integration configuration with the new key
-   - Restart Home Assistant or reload the Homey integration
+   - After updating permissions, restart Home Assistant or reload the Homey integration
 
 2. **Check Socket.IO Connection Status**:
    - Go to **Settings** → **System** → **Logs**
