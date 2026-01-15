@@ -7,8 +7,12 @@ CONF_HOST = "host"
 CONF_TOKEN = "token"
 CONF_DEVICE_FILTER = "device_filter"
 CONF_WORKING_ENDPOINT = "working_endpoint"  # Store which endpoint structure worked
+CONF_POLL_INTERVAL = "poll_interval"
+CONF_RECOVERY_COOLDOWN = "recovery_cooldown"
 
 DEFAULT_NAME = "Homey"
+DEFAULT_POLL_INTERVAL = 10  # seconds (fallback when Socket.IO is down)
+DEFAULT_RECOVERY_COOLDOWN = 300  # seconds
 
 # Homey API endpoints
 # Try manager API structure first (based on Homey API documentation)

@@ -13,10 +13,18 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_DEVICE_FILTER, CONF_TOKEN, DOMAIN
+from .const import (
+    CONF_DEVICE_FILTER,
+    CONF_POLL_INTERVAL,
+    CONF_RECOVERY_COOLDOWN,
+    CONF_TOKEN,
+    DEFAULT_POLL_INTERVAL,
+    DEFAULT_RECOVERY_COOLDOWN,
+    DOMAIN,
+)
 from .device_info import get_device_type
 
 _LOGGER = logging.getLogger(__name__)
@@ -28,11 +36,65 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
     }
 )
 
-
 class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Homey."""
 
     VERSION = 1
+
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:
+        """Handle reauthentication flow."""
+        self._reauth_entry = self.hass.config_entries.async_get_entry(
+            self.context["entry_id"]
+        )
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Confirm reauthentication and update credentials."""
+        errors: dict[str, str] = {}
+        entry = getattr(self, "_reauth_entry", None)
+        current_host = entry.data.get(CONF_HOST, "") if entry else ""
+
+        if user_input is not None:
+            host = user_input[CONF_HOST].strip().rstrip("/")
+            token = user_input[CONF_TOKEN].strip()
+
+            if not host.startswith(("http://", "https://")):
+                host = f"http://{host}"
+
+            valid, working_endpoint, error_key = await self._async_validate_host_token(
+                host, token
+            )
+            if valid and entry:
+                new_data = {
+                    **entry.data,
+                    CONF_HOST: host,
+                    CONF_TOKEN: token,
+                    "working_endpoint": working_endpoint or entry.data.get("working_endpoint"),
+                }
+                self.hass.config_entries.async_update_entry(entry, data=new_data)
+                await self.hass.config_entries.async_reload(entry.entry_id)
+                return self.async_abort(reason="reauth_successful")
+            if error_key:
+                errors["base"] = error_key
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_HOST, default=current_host): str,
+                vol.Required(CONF_TOKEN): str,
+            }
+        )
+        return self.async_show_form(
+            step_id="reauth_confirm", data_schema=schema, errors=errors
+        )
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> config_entries.OptionsFlow:
+        """Return the options flow handler."""
+        _LOGGER.info("Homey options flow registered for entry: %s", config_entry.entry_id)
+        return HomeyOptionsFlowHandler(config_entry)
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -384,6 +446,391 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 if isinstance(devices_data, dict):
                                     devices = devices_data
                                 elif isinstance(devices_data, list):
+                                    devices = {
+                                        device.get("id", str(i)): device
+                                        for i, device in enumerate(devices_data)
+                                    }
+                                break
+                    except Exception as err:
+                        _LOGGER.debug("Error fetching devices from %s: %s", device_endpoint, err)
+                        continue
+                
+                # Try to get zones (rooms)
+                # Note: Zones may require additional API permissions (homey.zone.readonly)
+                # If zones can't be fetched, we'll proceed without room grouping
+                zone_endpoints = [
+                    f"{self.host}/api/manager/zones/zone/",
+                    f"{self.host}/api/manager/zones/zone",
+                    f"{self.host}/api/v1/zone/",
+                    f"{self.host}/api/v1/zone",
+                ]
+                
+                zones_fetched = False
+                for zone_endpoint in zone_endpoints:
+                    try:
+                        async with session.get(zone_endpoint) as response:
+                            if response.status == 200:
+                                zones_data = await response.json()
+                                if isinstance(zones_data, dict):
+                                    zones = zones_data
+                                elif isinstance(zones_data, list):
+                                    zones = {
+                                        zone.get("id", str(i)): zone
+                                        for i, zone in enumerate(zones_data)
+                                    }
+                                zones_fetched = True
+                                _LOGGER.debug("Successfully fetched zones from %s", zone_endpoint)
+                                break
+                            elif response.status == 401:
+                                _LOGGER.debug(
+                                    "Zones endpoint requires authentication - may need homey.zone.readonly permission"
+                                )
+                                continue
+                            elif response.status == 403:
+                                _LOGGER.debug(
+                                    "Zones endpoint forbidden - API key may not have homey.zone.readonly permission"
+                                )
+                                continue
+                    except Exception as err:
+                        _LOGGER.debug("Error fetching zones from %s: %s", zone_endpoint, err)
+                        continue
+                
+                if not zones_fetched:
+                    _LOGGER.info(
+                        "Could not fetch zones/rooms from Homey. Devices will be shown without room grouping. "
+                        "This may require homey.zone.readonly permission in your API key."
+                    )
+                    zones = {}
+        except Exception as err:
+            _LOGGER.error("Failed to fetch devices: %s", err)
+            errors["base"] = "cannot_fetch_devices"
+        
+        if user_input is not None:
+            # User has selected devices from multi-select
+            selected_device_ids = user_input.get(CONF_DEVICE_FILTER, [])
+            
+            # If no devices selected, import all (None means import all)
+            if not selected_device_ids:
+                selected_device_ids = None
+            
+            # Get Homey name for entry title
+            name = "Homey"
+            try:
+                timeout = aiohttp.ClientTimeout(total=10)
+                connector = aiohttp.TCPConnector(ssl=False)
+                async with aiohttp.ClientSession(
+                    connector=connector,
+                    timeout=timeout,
+                    headers={"Authorization": f"Bearer {self.token}"},
+                ) as session:
+                    for endpoint in ["/api/manager/system/info", "/api/v1/system"]:
+                        try:
+                            async with session.get(f"{self.host}{endpoint}") as response:
+                                if response.status == 200:
+                                    data = await response.json()
+                                    name = data.get("name") or data.get("homeyName") or "Homey"
+                                    break
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+            
+            return self.async_create_entry(
+                title=name,
+                data={
+                    CONF_HOST: self.host,
+                    CONF_TOKEN: self.token,
+                    "working_endpoint": self.working_endpoint,
+                    CONF_DEVICE_FILTER: selected_device_ids,  # None means import all
+                },
+            )
+        
+        if not devices:
+            # No devices found or error - proceed without selection
+            _LOGGER.warning("No devices found or error fetching devices, proceeding with all devices")
+            return self.async_create_entry(
+                title="Homey",
+                data={
+                    CONF_HOST: self.host,
+                    CONF_TOKEN: self.token,
+                    "working_endpoint": self.working_endpoint,
+                    CONF_DEVICE_FILTER: None,  # Import all
+                },
+            )
+        
+        # Group devices by room/zone and type for better organization
+        devices_by_room_and_type: dict[str, dict[str, list[tuple[str, dict[str, Any], str]]]] = {}
+        devices_no_room_by_type: dict[str, list[tuple[str, dict[str, Any], str]]] = {}
+        
+        # Device type labels for display
+        type_labels = {
+            "light": "Light",
+            "switch": "Switch",
+            "sensor": "Sensor",
+            "binary_sensor": "Binary Sensor",
+            "cover": "Cover",
+            "climate": "Climate",
+            "fan": "Fan",
+            "lock": "Lock",
+            "media_player": "Media Player",
+            "device": "Device",
+        }
+        
+        # Check if we have zones - if not, don't group by room
+        has_zones = bool(zones)
+        
+        for device_id, device in devices.items():
+            capabilities = device.get("capabilitiesObj", {})
+            driver_uri = device.get("driverUri")
+            device_class = device.get("class")
+            device_type = get_device_type(capabilities, driver_uri, device_class)
+            type_label = type_labels.get(device_type, "Device")
+            zone_id = device.get("zone")
+            
+            # Only group by room if we have zones AND device has a zone
+            if has_zones and zone_id and zone_id in zones:
+                zone_name = zones[zone_id].get("name", "Unknown Room")
+                if zone_name not in devices_by_room_and_type:
+                    devices_by_room_and_type[zone_name] = {}
+                if device_type not in devices_by_room_and_type[zone_name]:
+                    devices_by_room_and_type[zone_name][device_type] = []
+                devices_by_room_and_type[zone_name][device_type].append(
+                    (device_id, device, type_label)
+                )
+            else:
+                # Device has no room or zones couldn't be fetched
+                if device_type not in devices_no_room_by_type:
+                    devices_no_room_by_type[device_type] = []
+                devices_no_room_by_type[device_type].append((device_id, device, type_label))
+        
+        # Build device options dict for multi-select (cv.multi_select works with voluptuous_serialize)
+        # Format: {device_id: "Room • Type • Device Name"}
+        device_options: dict[str, str] = {}
+        
+        # Device type order for consistent sorting (most common first)
+        type_order = [
+            "light",
+            "switch",
+            "cover",
+            "climate",
+            "fan",
+            "lock",
+            "media_player",
+            "sensor",
+            "binary_sensor",
+            "device",
+        ]
+        
+        # Build options dict grouped by room, then by type (sorted alphabetically)
+        for room_name in sorted(devices_by_room_and_type.keys()):
+            room_types = devices_by_room_and_type[room_name]
+            # Sort types by our preferred order, then alphabetically
+            sorted_types = sorted(
+                room_types.keys(),
+                key=lambda t: (type_order.index(t) if t in type_order else 999, t),
+            )
+            
+            for device_type in sorted_types:
+                room_devices = sorted(
+                    room_types[device_type],
+                    key=lambda x: x[1].get("name", "").lower(),
+                )
+                
+                for device_id, device, type_label in room_devices:
+                    device_name = device.get("name", f"Device {device_id}")
+                    # Create display name with room (if available), type, and device name
+                    if room_name and room_name != "Unknown Room":
+                        display_name = f"{room_name} • {type_label} • {device_name}"
+                    else:
+                        display_name = f"{type_label} • {device_name}"
+                    device_options[device_id] = display_name
+        
+        # Add devices without room, grouped by type
+        if devices_no_room_by_type:
+            sorted_no_room_types = sorted(
+                devices_no_room_by_type.keys(),
+                key=lambda t: (type_order.index(t) if t in type_order else 999, t),
+            )
+            
+            for device_type in sorted_no_room_types:
+                type_label = type_labels.get(device_type, "Device")
+                devices_no_room_sorted = sorted(
+                    devices_no_room_by_type[device_type],
+                    key=lambda x: x[1].get("name", "").lower(),
+                )
+                
+                for device_id, device, type_label_actual in devices_no_room_sorted:
+                    device_name = device.get("name", f"Device {device_id}")
+                    # Only show "No Room" if we successfully fetched zones but device has no room
+                    if zones:
+                        display_name = f"No Room • {type_label_actual} • {device_name}"
+                    else:
+                        display_name = f"{type_label_actual} • {device_name}"
+                    device_options[device_id] = display_name
+        
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_DEVICE_FILTER, default=list(device_options.keys())
+                ): cv.multi_select(device_options)
+            }
+        )
+        return self.async_show_form(
+            step_id="device_selection", data_schema=schema, errors=errors
+        )
+
+    async def _async_validate_host_token(
+        self, host: str, token: str
+    ) -> tuple[bool, str | None, str | None]:
+        """Validate Homey host and token. Returns (valid, working_endpoint, error_key)."""
+        use_https = host.startswith("https://")
+        timeout = aiohttp.ClientTimeout(total=10)
+        if use_https:
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+        else:
+            connector = aiohttp.TCPConnector(ssl=False)
+
+        endpoints_to_try = [
+            "/api/manager/system/info",
+            "/api/manager/system/info/",
+            "/api/manager/system",
+            "/api/manager/system/",
+            "/api/v1/manager/system/info",
+            "/api/v1/manager/system/info/",
+            "/api/v1/manager/system",
+            "/api/v1/manager/system/",
+            "/api/v1/system/info",
+            "/api/v1/system/info/",
+            "/api/v1/system",
+            "/api/v1/system/",
+        ]
+
+        async with aiohttp.ClientSession(
+            connector=connector,
+            timeout=timeout,
+            headers={"Authorization": f"Bearer {token}"},
+        ) as session:
+            for endpoint in endpoints_to_try:
+                try:
+                    async with session.get(f"{host}{endpoint}") as response:
+                        if response.status == 200:
+                            working_endpoint = (
+                                "manager" if "/api/manager" in endpoint else "v1"
+                            )
+                            return True, working_endpoint, None
+                        if response.status == 401:
+                            return False, None, "invalid_auth"
+                except Exception:
+                    continue
+        return False, None, "cannot_connect"
+
+
+class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
+    """Handle options for the Homey integration."""
+
+    def __init__(self, config_entry: ConfigEntry) -> None:
+        """Initialize Homey options flow."""
+        self.config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Manage the Homey options."""
+        if user_input is not None:
+            host = user_input[CONF_HOST].strip().rstrip("/")
+            token = user_input.get(CONF_TOKEN, "").strip()
+            poll_interval = user_input.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
+            recovery_cooldown = user_input.get(
+                CONF_RECOVERY_COOLDOWN, DEFAULT_RECOVERY_COOLDOWN
+            )
+
+            if not host.startswith(("http://", "https://")):
+                host = f"http://{host}"
+
+            new_data = {**self.config_entry.data, CONF_HOST: host}
+            if token:
+                new_data[CONF_TOKEN] = token
+
+            new_options = {
+                **self.config_entry.options,
+                CONF_POLL_INTERVAL: poll_interval,
+                CONF_RECOVERY_COOLDOWN: recovery_cooldown,
+            }
+
+            self.hass.config_entries.async_update_entry(
+                self.config_entry, data=new_data, options=new_options
+            )
+            await self.hass.config_entries.async_reload(self.config_entry.entry_id)
+            return self.async_create_entry(title="", data={})
+
+        defaults = {
+            CONF_HOST: self.config_entry.data.get(CONF_HOST, ""),
+            CONF_TOKEN: "",
+            CONF_POLL_INTERVAL: self.config_entry.options.get(
+                CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
+            ),
+            CONF_RECOVERY_COOLDOWN: self.config_entry.options.get(
+                CONF_RECOVERY_COOLDOWN, DEFAULT_RECOVERY_COOLDOWN
+            ),
+        }
+        options_schema = vol.Schema(
+            {
+                vol.Required(CONF_HOST, default=defaults[CONF_HOST]): str,
+                vol.Optional(CONF_TOKEN, default=defaults[CONF_TOKEN]): str,
+                vol.Optional(
+                    CONF_POLL_INTERVAL, default=defaults[CONF_POLL_INTERVAL]
+                ): vol.All(vol.Coerce(int), vol.Clamp(min=5, max=60)),
+                vol.Optional(
+                    CONF_RECOVERY_COOLDOWN, default=defaults[CONF_RECOVERY_COOLDOWN]
+                ): vol.All(vol.Coerce(int), vol.Clamp(min=60, max=3600)),
+            }
+        )
+        return self.async_show_form(
+            step_id="init", data_schema=options_schema, errors={}
+        )
+
+    async def async_step_device_selection(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle device selection step."""
+        errors: dict[str, str] = {}
+        
+        # Store device_id to display_name mapping for parsing user input
+        if not hasattr(self, "_device_id_to_display_name"):
+            self._device_id_to_display_name = {}
+        
+        # Fetch devices and zones from Homey
+        devices = {}
+        zones = {}
+        try:
+            timeout = aiohttp.ClientTimeout(total=10)
+            connector = aiohttp.TCPConnector(ssl=False)
+            
+            async with aiohttp.ClientSession(
+                connector=connector,
+                timeout=timeout,
+                headers={"Authorization": f"Bearer {self.token}"},
+            ) as session:
+                # Try to get devices
+                device_endpoints = [
+                    f"{self.host}/api/manager/devices/device/",
+                    f"{self.host}/api/manager/devices/device",
+                    f"{self.host}/api/v1/device/",
+                    f"{self.host}/api/v1/device",
+                ]
+                
+                for device_endpoint in device_endpoints:
+                    try:
+                        async with session.get(device_endpoint) as response:
+                            if response.status == 200:
+                                devices_data = await response.json()
+                                # Handle both dict and list responses
+                                if isinstance(devices_data, dict):
+                                    devices = devices_data
+                                elif isinstance(devices_data, list):
                                     devices = {device.get("id", str(i)): device for i, device in enumerate(devices_data)}
                                 break
                     except Exception as err:
@@ -630,13 +1077,83 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Manage the options."""
-        return await self.async_step_device_management()
+        return self.async_show_menu(
+            step_id="init",
+            menu_options={
+                "settings": "Connection & Polling",
+                "device_management": "Manage Devices",
+            },
+        )
+
+    async def async_step_settings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle connection and polling settings."""
+        host_label = "Homey IP Address or Hostname"
+        token_label = "API Key (leave blank to keep current)"
+        poll_label = "Fallback polling interval (seconds)"
+        recovery_label = "Recovery cooldown (seconds, between auto-recovery attempts)"
+        if user_input is not None:
+            host = user_input[host_label].strip().rstrip("/")
+            token = user_input.get(token_label, "").strip()
+            poll_interval = user_input.get(poll_label, DEFAULT_POLL_INTERVAL)
+            recovery_cooldown = user_input.get(recovery_label, DEFAULT_RECOVERY_COOLDOWN)
+
+            if not host.startswith(("http://", "https://")):
+                host = f"http://{host}"
+
+            new_data = {**self._entry.data, CONF_HOST: host}
+            if token:
+                new_data[CONF_TOKEN] = token
+
+            new_options = {
+                **self._entry.options,
+                CONF_POLL_INTERVAL: poll_interval,
+                CONF_RECOVERY_COOLDOWN: recovery_cooldown,
+            }
+
+            self.hass.config_entries.async_update_entry(
+                self._entry, data=new_data, options=new_options
+            )
+            await self.hass.config_entries.async_reload(self._entry.entry_id)
+            return self.async_create_entry(title="", data={})
+
+        defaults = {
+            host_label: self._entry.data.get(CONF_HOST, ""),
+            token_label: "",
+            poll_label: self._entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL),
+            recovery_label: self._entry.options.get(
+                CONF_RECOVERY_COOLDOWN, DEFAULT_RECOVERY_COOLDOWN
+            ),
+        }
+        options_schema = vol.Schema(
+            {
+                vol.Required(host_label, default=defaults[host_label]): str,
+                vol.Optional(token_label, default=defaults[token_label]): str,
+                vol.Required(poll_label, default=defaults[poll_label]): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=5, max=60, step=1, mode=selector.NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Required(
+                    recovery_label, default=defaults[recovery_label]
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=60, max=3600, step=30, mode=selector.NumberSelectorMode.BOX
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(
+            step_id="settings", data_schema=options_schema, errors={}
+        )
 
     async def async_step_device_management(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle device management step."""
         errors: dict[str, str] = {}
+        device_filter_label = "Devices"
         
         # Get currently selected devices from config entry
         current_selected = self._entry.data.get(CONF_DEVICE_FILTER)
@@ -723,7 +1240,7 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
         
         if user_input is not None:
             # User has selected devices from multi-select
-            selected_device_ids = user_input.get(CONF_DEVICE_FILTER, [])
+            selected_device_ids = user_input.get(device_filter_label, [])
             
             # If no devices selected, import all (None means import all)
             if not selected_device_ids:
@@ -858,12 +1375,14 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
             default_selected = [did for did in current_selected if did in device_options]
         
         # Use cv.multi_select for device selection - this works with voluptuous_serialize
-        device_schema = vol.Schema({
-            vol.Optional(
-                CONF_DEVICE_FILTER,
-                default=default_selected
-            ): cv.multi_select(device_options),
-        })
+        device_schema = vol.Schema(
+            {
+                vol.Optional(
+                    device_filter_label,
+                    default=default_selected,
+                ): cv.multi_select(device_options),
+            }
+        )
         
         return self.async_show_form(
             step_id="device_management",

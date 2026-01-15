@@ -140,9 +140,15 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
         
         supported_features = CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE | CoverEntityFeature.STOP
         
-        # Only add POSITION feature if device supports numeric position
+        # Only add position feature if device supports numeric position
+        # Home Assistant uses SET_POSITION (POSITION doesn't exist in some versions)
         if self._has_windowcoverings and self._supports_position:
-            supported_features |= CoverEntityFeature.POSITION
+            position_feature = (
+                getattr(CoverEntityFeature, "SET_POSITION", None)
+                or getattr(CoverEntityFeature, "POSITION", None)
+            )
+            if position_feature is not None:
+                supported_features |= position_feature
 
         if "windowcoverings_tilt_up" in capabilities and "windowcoverings_tilt_down" in capabilities:
             supported_features |= CoverEntityFeature.SET_TILT_POSITION | CoverEntityFeature.OPEN_TILT | CoverEntityFeature.CLOSE_TILT
@@ -180,7 +186,7 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
                 elif state == "down":
                     return 0
                 elif state == "idle":
-                    return 50
+                    return None
                 else:
                     # Unknown enum value, return None
                     return None

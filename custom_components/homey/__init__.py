@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import selector
 
-from .const import CONF_DEVICE_FILTER, DOMAIN
+from .const import (
+    CONF_DEVICE_FILTER,
+    CONF_POLL_INTERVAL,
+    CONF_RECOVERY_COOLDOWN,
+    DOMAIN,
+    DEFAULT_POLL_INTERVAL,
+    DEFAULT_RECOVERY_COOLDOWN,
+)
 from .coordinator import HomeyDataUpdateCoordinator
 from .homey_api import HomeyAPI
 
@@ -204,7 +212,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     zones = await api.get_zones()
     
     # Create coordinator (pass zones so it can update device registry)
-    coordinator = HomeyDataUpdateCoordinator(hass, api, zones)
+    poll_interval = entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
+    recovery_cooldown = entry.options.get(CONF_RECOVERY_COOLDOWN, DEFAULT_RECOVERY_COOLDOWN)
+    coordinator = HomeyDataUpdateCoordinator(
+        hass,
+        api,
+        zones,
+        update_interval=timedelta(seconds=poll_interval),
+        recovery_cooldown=recovery_cooldown,
+    )
     await coordinator.async_config_entry_first_refresh()
 
     hass.data[DOMAIN][entry.entry_id] = {
