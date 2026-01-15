@@ -30,7 +30,7 @@ Without this permission, real-time updates will not work and the integration wil
 - Device selection defaults to **all devices selected**
 - Prevents device removals when Homey temporarily returns no devices
 
-For the full list of changes, additions, and fixes, see the [CHANGELOG](CHANGELOG.md).
+For the full list of changes, additions, and fixes, see the [CHANGELOG](https://github.com/ifMike/homeyHASS/blob/v1.1.6/CHANGELOG.md).
 
 ---
 
