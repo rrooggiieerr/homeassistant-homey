@@ -4,7 +4,7 @@
 [![GitHub issues](https://img.shields.io/github/issues/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/issues)
 [![GitHub stars](https://img.shields.io/github/stars/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/stargazers)
 
-**Version**: 1.1.5 | **Last Updated**: 2026-01-12 | [Changelog](CHANGELOG.md)
+**Version**: 1.1.5-dev.10 | **Last Updated**: 2026-01-15 | [Changelog](CHANGELOG.md)
 
 A Homey integration for Home Assistant that automatically discovers and connects all your Homey devices, making them available natively in Home Assistant.
 
@@ -32,8 +32,10 @@ This Homey integration brings your [Homey](https://homey.app) hub into Home Assi
 - 🎵 **Media Player Metadata**: Full media metadata support including artist, album, track, duration, position, shuffle, and repeat
 - 🏠 **Room Organization**: Automatically assigns devices to Home Assistant Areas based on Homey rooms
 - 🔄 **Automatic Synchronization**: Automatically syncs device changes from Homey (renames, room changes, deletions)
-- 📡 **Fast Status Updates**: Immediate status updates after changes (1-2 seconds), with background polling every 10 seconds
+- ⚡ **Real-Time Updates**: Socket.IO-powered instant state synchronization (< 1 second latency) - device changes in Homey appear immediately in Home Assistant
+- 📡 **Smart Polling**: Automatic fallback to polling (5-10 seconds) if Socket.IO fails, with dynamic intervals (60s when Socket.IO active, 10s when inactive)
 - ⚙️ **Easy Setup**: Simple configuration flow through Home Assistant's UI
+- ⚙️ **Options & Reauth flows**: Update Homey host/IP, API key, and fallback polling settings without reinstalling
 - 🎯 **Smart Device Grouping**: All entities from the same device are automatically grouped under one device entry
 - 🔐 **Permission Management**: Comprehensive permission checking with graceful degradation - integration works even with limited permissions
 
@@ -78,12 +80,16 @@ This Homey integration brings your [Homey](https://homey.app) hub into Home Assi
   - [Room/Area Changes](#roomarea-changes)
   - [Device Deletion](#device-deletion)
   - [Update Frequency](#update-frequency)
+- [Real-Time Updates](#real-time-updates)
+  - [How It Works](#how-it-works)
+  - [Requirements](#requirements)
+  - [Benefits](#benefits)
+  - [Troubleshooting Real-Time Updates](#troubleshooting-real-time-updates)
 - [Supported Devices](SUPPORTED_DEVICES.md)
 - [Known Issues & Limitations](#known-issues--limitations)
   - [Room/Zone Detection](#roomzone-detection)
   - [Config Flow Window Size](#config-flow-window-size)
   - [Entity Name Updates](#entity-name-updates)
-  - [Socket.IO Real-time Updates](#socketio-real-time-updates)
 - [Troubleshooting](#troubleshooting)
   - [Connection Issues](#connection-issues)
   - [Devices Not Appearing](#devices-not-appearing)
@@ -126,6 +132,7 @@ Before installing the integration, you need to create an API Key in Homey:
    **Required Permissions:**
    - **View devices** (`homey.device.readonly`) - **Required** to read device states and discover devices
    - **Control devices** (`homey.device.control`) - **Required** to control devices (turn on/off, set brightness, etc.)
+   - **View System** (`homey.system.readonly`) - **Required** for Socket.IO real-time updates. Without this, the integration will use polling (5-10 second updates) instead of instant updates (< 1 second). See [Real-Time Updates](#real-time-updates) section below.
    
    **Recommended Permissions:**
    - **View Zones** (`homey.zone.readonly`) - **Recommended** for room/area organization. Without this, devices won't be organized by Homey rooms.
@@ -144,13 +151,16 @@ Before installing the integration, you need to create an API Key in Homey:
 |-----------|-------------------|
 | `homey.device.readonly` | ❌ **Integration will not work** - Cannot discover or read devices |
 | `homey.device.control` | ⚠️ **Device control disabled** - Cannot turn devices on/off, change settings, etc. |
+| `homey.system.readonly` | ⚠️ **Socket.IO disabled** - Real-time updates via Socket.IO won't work, will use polling (5-10 second updates) instead |
 | `homey.zone.readonly` | ⚠️ **No room organization** - Devices won't be grouped by Homey rooms/areas |
 | `homey.flow.readonly` | ⚠️ **Flow listing disabled** - Flow button entities won't be created |
 | `homey.flow.start` | ⚠️ **Flow control disabled** - Cannot trigger, enable, or disable flows |
 | `homey.mood.readonly` | ⚠️ **Mood listing disabled** - Mood entities won't be created |
 | `homey.mood.set` | ⚠️ **Mood activation disabled** - Cannot activate moods |
 
-**Note**: The integration will log warnings in Home Assistant's logs when permissions are missing, but it won't break. Features requiring missing permissions will simply be disabled.
+**Note**: The integration will log warnings in Home Assistant's logs when permissions are missing, but it won't break. Features requiring missing permissions will simply be disabled. However, `homey.system.readonly` is **required** for Socket.IO real-time updates - without it, the integration will use polling (5-10 second updates) instead of instant updates (< 1 second).
+
+**⚠️ Important for Real-Time Updates**: The **System → View System** permission (`homey.system.readonly`) is **required** for Socket.IO real-time updates. You need to **create a new API key** with this permission enabled. Go to Homey Settings → API Keys and create a new API key. Make sure to enable all the same permissions as your current API key, plus the new `homey.system.readonly` permission. After creating the new API key, update your Home Assistant integration configuration with the new key and restart Home Assistant or reload the Homey integration.
 
 **Important**: Keep this API Key safe - you'll need it during the setup process!
 
@@ -274,6 +284,7 @@ After copying files:
 11. Restart Home Assistant
 12. Go to **Settings** → **Devices & Services** → **Add Integration**
 13. Search for **"Homey"** and follow the setup instructions
+   - You can update the host/IP, API key, and fallback polling later via **Settings → Devices & Services → Homey → Configure**
 
 **Option 2: HACS Default Repository (Future)**
 
@@ -284,6 +295,7 @@ Once this integration is added to the HACS default repository, you can simply:
 4. Click **Download**
 5. Restart Home Assistant
 6. Configure the integration
+   - You can update the host/IP, API key, and fallback polling later via **Settings → Devices & Services → Homey → Configure**
 
 #### Updating via HACS
 
@@ -660,12 +672,71 @@ The integration automatically synchronizes changes made in Homey with Home Assis
 - Cleanup occurs within ~30 seconds after deletion
 
 ### Update Frequency
+
+**Real-Time Updates (Socket.IO)** - *Recommended*
+- **Instant Synchronization**: Device state changes in Homey (via app, physical switches, or automations) appear in Home Assistant instantly (< 1 second latency)
+- **Bidirectional**: Commands sent from Home Assistant to Homey also get instant feedback
+- **Requires**: `homey.system.readonly` permission on your API key (see [Prerequisites](#prerequisites))
+- **Fallback**: If Socket.IO connection fails, automatically falls back to polling (5-10 seconds)
+- **Polling Interval**: When Socket.IO is active, polling reduces to 60 seconds (safety net). When inactive, polling uses 5-10 seconds.
+
+**Polling Mode** - *Fallback*
 - **Immediate Updates**: When you control a device (turn on/off, change brightness, color, etc.), the status updates immediately (1-2 seconds) by fetching the device state right after the change
-- **Background Polling**: Device states are polled every 10 seconds to catch changes made outside Home Assistant (e.g., via Homey app or physical switches)
-- Device names/rooms: Checked every 10 seconds during polling
+- **Background Polling**: Device states are polled every 5-10 seconds to catch changes made outside Home Assistant (e.g., via Homey app or physical switches)
+- Device names/rooms: Checked during polling cycles
 - Zones (rooms): Refreshed every ~5 minutes
 
 **Note**: Entity names (`_attr_name`) are set during initialization and won't update automatically. The device name in the UI will update, but individual entity names may show the old name until you reload the integration. This is a Home Assistant limitation and is acceptable for most use cases.
+
+---
+
+## Real-Time Updates
+
+The integration supports real-time device state updates via Socket.IO, providing instant synchronization between Homey and Home Assistant.
+
+### How It Works
+
+**Socket.IO Real-Time Updates** (Recommended)
+- Device state changes in Homey (via app, physical switches, or automations) appear in Home Assistant instantly (< 1 second latency)
+- Commands sent from Home Assistant to Homey also get instant feedback
+- Uses a single WebSocket connection for efficient communication
+- Automatically reconnects if the connection is lost
+- When active, polling reduces to 60 seconds (safety net)
+
+**Polling Fallback** (Automatic)
+- If Socket.IO connection fails or the required permission is missing, the integration automatically falls back to polling
+- Polling interval: 5-10 seconds when Socket.IO is inactive
+- The integration continues to work normally, just without instant updates
+
+### Requirements
+
+To enable Socket.IO real-time updates:
+
+1. **Create a New API Key**:
+   - Go to **Homey Settings → API Keys**
+   - **Create a new API key** with the **System → View System** permission (`homey.system.readonly`) enabled
+   - Make sure to enable all the same permissions as your current API key, plus the new `homey.system.readonly` permission
+
+2. **Update Integration Configuration**:
+   - After creating the new API key, update your Home Assistant integration configuration with the new key
+   - Go to **Settings** → **Devices & Services** → **Homey** → **Configure**
+   - Enter the new API key
+   - Restart Home Assistant or reload the Homey integration
+
+3. **Verify Connection**:
+   - Check Home Assistant logs for "Socket.IO real-time updates enabled" message
+   - This confirms Socket.IO is active and working
+
+### Benefits
+
+- **Instant Updates**: Device changes appear immediately (< 1 second) instead of waiting for polling cycles
+- **Bidirectional**: Both Homey → Home Assistant and Home Assistant → Homey updates are instant
+- **Efficient**: Reduces API calls by using WebSocket instead of frequent HTTP polling
+- **Reliable**: Automatic fallback to polling ensures updates are never missed
+
+### Troubleshooting Real-Time Updates
+
+If Socket.IO is not working, see the [Real-time Updates Not Working](#real-time-updates-not-working) section in Troubleshooting.
 
 ---
 
@@ -707,7 +778,7 @@ For complete details on all supported capabilities, device classes, and entity t
 ### Room/Zone Detection
 - **Issue**: Rooms may not be detected if your API key doesn't have **View Zones** permission.
 - **Impact**: Devices will still be imported and work correctly, but won't be organized by rooms in the device selection dialog or assigned to areas automatically.
-- **Solution**: Add **View Zones** permission to your API key in Homey Settings → API Keys → Edit your API key.
+- **Solution**: Create a new API key in Homey Settings → API Keys with the **View Zones** permission enabled.
 
 ### Config Flow Window Size
 - **Issue**: The device selection dialog has a fixed size and cannot be resized or customized.
@@ -718,11 +789,6 @@ For complete details on all supported capabilities, device classes, and entity t
 - **Issue**: Entity names don't update automatically when device names change in Homey.
 - **Impact**: Device names in the UI will update, but individual entity names may show old names until you reload the integration.
 - **Solution**: Reload the integration after renaming devices in Homey if you want entity names to update immediately.
-
-### Socket.IO Real-time Updates
-- **Issue**: Real-time updates via Socket.IO are currently disabled due to authentication complexity.
-- **Impact**: Changes made outside Home Assistant (via Homey app or physical switches) may take up to 10 seconds to appear due to polling interval. However, changes made within Home Assistant update immediately (1-2 seconds).
-- **Solution**: This is a known limitation. The current approach provides immediate feedback for your actions while using efficient polling for external changes. Polling every 10 seconds with immediate refresh after commands provides a good balance of responsiveness and reliability.
 
 ---
 
@@ -795,12 +861,38 @@ If you see duplicate devices:
 
 ### Real-time Updates Not Working
 
-If device states aren't updating:
+If device states aren't updating in real-time:
 
-- The integration uses polling for updates (every 30 seconds by default)
-- Socket.IO support is planned for real-time updates
-- Check your network connectivity between Home Assistant and Homey
-- Check the logs for any connection errors
+1. **Check API Key Permissions**:
+   - Go to **Homey Settings → API Keys** and create a new API key
+   - Ensure **System → View System** (`homey.system.readonly`) permission is enabled
+   - Make sure to enable all the same permissions as your current API key, plus the new `homey.system.readonly` permission
+   - After creating the new API key, update your Home Assistant integration configuration with the new key
+   - Restart Home Assistant or reload the Homey integration
+
+2. **Check Socket.IO Connection Status**:
+   - Go to **Settings** → **System** → **Logs**
+   - Look for "Socket.IO real-time updates enabled" message (indicates Socket.IO is working)
+   - If you see "Socket.IO status: DISCONNECTED", Socket.IO is not active and polling is being used
+
+3. **Verify Network Connectivity**:
+   - Ensure Home Assistant can reach your Homey hub on the network
+   - Check for firewalls blocking WebSocket connections (Socket.IO uses WebSockets)
+
+4. **Check Logs for Errors**:
+   - Enable debug logging if needed:
+     ```yaml
+     logger:
+       default: info
+       logs:
+         custom_components.homey: debug
+     ```
+   - Look for Socket.IO connection errors or permission-related warnings
+
+5. **Fallback Behavior**:
+   - If Socket.IO fails, the integration automatically uses polling (5-10 seconds)
+   - The integration will continue to work, just without instant updates
+   - Socket.IO will automatically reconnect if the connection is lost
 
 ### Device Changes Not Syncing
 

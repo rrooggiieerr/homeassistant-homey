@@ -37,11 +37,45 @@ async def async_setup_entry(
 
     for device_id, device in devices.items():
         capabilities = device.get("capabilitiesObj", {})
+        driver_id = device.get("driverId", "")
+        device_name = device.get("name", "Unknown")
+        device_class = device.get("class", "")
+        
+        # Check if this is a devicegroups group
+        is_devicegroups_group = driver_id.startswith("homey:app:com.swttt.devicegroups:")
+        if is_devicegroups_group:
+            _LOGGER.debug(
+                "Found devicegroups group in cover platform: %s (id: %s, class: %s, driverId: %s, capabilities: %s)",
+                device_name,
+                device_id,
+                device_class,
+                driver_id,
+                list(capabilities.keys())
+            )
+        
+        # Special handling for devicegroups groups: respect their class
+        # If a group has cover-related class, treat it as a cover
+        is_devicegroups_cover = (
+            is_devicegroups_group 
+            and device_class in ["windowcoverings", "cover", "curtain", "blind", "shutter", "awning", "garagedoor"]
+        )
+        
         # Support windowcoverings_state, windowcoverings_set, and garagedoor_closed capabilities
         # Reference: https://apps.developer.homey.app/the-basics/devices/capabilities
         # Note: Some devices use windowcoverings_set instead of windowcoverings_state
-        if any(cap in capabilities for cap in ["windowcoverings_state", "windowcoverings_set", "garagedoor_closed"]):
+        # Also support devicegroups groups with cover-related classes
+        has_cover_capabilities = any(
+            cap in capabilities for cap in ["windowcoverings_state", "windowcoverings_set", "garagedoor_closed"]
+        )
+        if has_cover_capabilities or is_devicegroups_cover:
             entities.append(HomeyCover(coordinator, device_id, device, api, zones))
+            if is_devicegroups_group:
+                _LOGGER.info(
+                    "Created cover entity for devicegroups group: %s (id: %s, has_cover_capabilities=%s)",
+                    device_name,
+                    device_id,
+                    has_cover_capabilities
+                )
 
     async_add_entities(entities)
 
@@ -106,9 +140,15 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
         
         supported_features = CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE | CoverEntityFeature.STOP
         
-        # Only add POSITION feature if device supports numeric position
+        # Only add position feature if device supports numeric position
+        # Home Assistant uses SET_POSITION (POSITION doesn't exist in some versions)
         if self._has_windowcoverings and self._supports_position:
-            supported_features |= CoverEntityFeature.POSITION
+            position_feature = (
+                getattr(CoverEntityFeature, "SET_POSITION", None)
+                or getattr(CoverEntityFeature, "POSITION", None)
+            )
+            if position_feature is not None:
+                supported_features |= position_feature
 
         if "windowcoverings_tilt_up" in capabilities and "windowcoverings_tilt_down" in capabilities:
             supported_features |= CoverEntityFeature.SET_TILT_POSITION | CoverEntityFeature.OPEN_TILT | CoverEntityFeature.CLOSE_TILT
@@ -146,7 +186,7 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
                 elif state == "down":
                     return 0
                 elif state == "idle":
-                    return 50
+                    return None
                 else:
                     # Unknown enum value, return None
                     return None
@@ -173,7 +213,7 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
             # Convert boolean to position: True (closed) = 0%, False (open) = 100%
             return 0 if is_closed else 100
         
-        return None
+            return None
 
     @property
     def is_closed(self) -> bool | None:
@@ -249,10 +289,10 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
             else:
                 # Numeric: get current position and set it again to stop
                 position = self.current_cover_position
-                if position is not None:
-                    await self._api.set_capability_value(
+        if position is not None:
+            await self._api.set_capability_value(
                         self._device_id, self._windowcoverings_cap, position / 100.0
-                    )
+            )
         # Immediately refresh this device's state for instant UI feedback
         await self.coordinator.async_refresh_device(self._device_id)
 
@@ -273,7 +313,7 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
             # Position > 50% = open (False), <= 50% = closed (True)
             await self._api.set_capability_value(
                 self._device_id, "garagedoor_closed", position <= 50
-            )
+        )
         # Immediately refresh this device's state for instant UI feedback
         await self.coordinator.async_refresh_device(self._device_id)
 

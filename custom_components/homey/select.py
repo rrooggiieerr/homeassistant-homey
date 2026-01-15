@@ -71,6 +71,12 @@ async def async_setup_entry(
                     _LOGGER.debug("Skipping internal Homey maintenance enum capability: %s", capability_id)
                     continue
                 
+                # Skip windowcoverings_state - it's handled by the cover platform, not select
+                # windowcoverings_state can be enum-based (up/idle/down) but should be a cover entity, not select
+                if capability_id == "windowcoverings_state":
+                    _LOGGER.debug("Skipping windowcoverings_state enum capability - handled by cover platform: %s", device_id)
+                    continue
+                
                 entities.append(
                     HomeySelect(coordinator, device_id, device, capability_id, cap_data, api, zones)
                 )

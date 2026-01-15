@@ -3,7 +3,15 @@
     "step": {
       "user": {
         "title": "Connect to Homey",
-        "description": "Enter your Homey IP address and API key to connect.",
+        "description": "Enter your Homey IP address and API key to connect.\n\n⚠️ **For Real-Time Updates**: To enable Socket.IO instant updates (< 1 second), create a new API key in Homey Settings → API Keys with the **System → View System** (`homey.system.readonly`) permission enabled. Without this, the integration will use polling (5-10 seconds).",
+        "data": {
+          "host": "Homey IP Address or Hostname",
+          "token": "API Key"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate Homey",
+        "description": "Your Homey API key is no longer valid. Create a new API key in Homey Settings → API Keys with the required permissions and enter it below.",
         "data": {
           "host": "Homey IP Address or Hostname",
           "token": "API Key"
@@ -11,7 +19,7 @@
       },
       "device_selection": {
         "title": "Select Devices",
-        "description": "Select which devices to import into Home Assistant. All devices are selected by default. You can deselect devices you don't want to import.",
+        "description": "Select which devices to import into Home Assistant. All devices are selected by default—deselect any you don't want to import.",
         "data": {}
       },
       "device_management": {
@@ -27,7 +35,37 @@
       "unknown": "An unexpected error occurred. Check the logs for details."
     },
     "abort": {
-      "already_configured": "This Homey hub is already configured."
+      "already_configured": "This Homey hub is already configured.",
+      "reauth_successful": "Reauthentication successful."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Homey Options",
+        "description": "Choose what you want to update.",
+        "menu_options": {
+          "settings": "Connection & Polling",
+          "device_management": "Manage Devices"
+        }
+      },
+      "settings": {
+        "title": "Connection & Polling",
+        "description": "Update Homey connection settings and fallback polling. Leave API key blank to keep the current one. Polling is only used when Socket.IO is not working. For Socket.IO real-time updates, create a new API key with **System → View System** (`homey.system.readonly`).",
+        "data": {
+          "host": "Homey IP Address or Hostname",
+          "token": "API Key (leave blank to keep current)",
+          "poll_interval": "Fallback polling interval (seconds)",
+          "recovery_cooldown": "Recovery cooldown (seconds, between auto-recovery attempts)"
+        }
+      },
+      "device_management": {
+        "title": "Manage Devices",
+        "description": "Select which devices to include in Home Assistant. All devices are selected by default—deselect any you don't want to import.",
+        "data": {
+          "device_filter": "Devices"
+        }
+      }
     }
   }
 }

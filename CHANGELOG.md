@@ -9,72 +9,204 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.5] - 2026-01-12
+## [1.1.5-dev.10] - 2026-01-15
 
-### 🎉 Major Release: Comprehensive Device Support Expansion and Home Assistant 2026.1 Compatibility
+### 🚀 Major Real-Time Updates Release
 
-**This is a significant release that dramatically expands device support and platform capabilities. Highlights include:**
+**This is a significant update that transforms the integration from polling-based to real-time event-driven updates. Device state changes in Homey now appear in Home Assistant instantly (< 1 second) instead of waiting for the next poll cycle (previously 10 seconds). This provides a truly responsive smart home experience where actions taken in Homey (via app, physical switches, or automations) are immediately reflected in Home Assistant's UI.**
 
-- **New Device Types**: Full support for vacuum cleaners, battery storage systems, lawn mowers, heat pumps, and solar panels
-- **Universal Capability Detection**: Automatic detection and support for ALL `measure_*`, `meter_*`, and `alarm_*` capabilities, even unknown ones
-- **Energy Dashboard Integration**: Complete compatibility with Home Assistant's Energy dashboard, including proper currency normalization for Tibber and other price sensors
-- **Enhanced Platform Support**: New number entity platform, generic boolean binary sensors, and automatic enum select entity creation
-- **Custom Thermostat Support**: Full support for custom thermostat implementations like ThermoFloor with mode-based control
-- **Home Assistant 2026.1 Compatibility**: Critical updates for vacuum entities using new `StateVacuumEntity` and `VacuumActivity` enum
-- **Device Classification Improvements**: Fixed light detection for socket-class devices, improved switch detection for multi-channel devices, and enhanced cover operation with enum-based windowcoverings support
-- **User Experience Enhancements**: Fixed area assignment preservation, added flow trigger service with entity selector dropdown, and significantly reduced logging noise
+**⚠️ IMPORTANT: API Key Requirement**
+- **This feature requires a new API key with the `homey.system.readonly` permission enabled**
+- Go to **Homey Settings → API Keys** and **create a new API key**
+- Enable the **System → View System** permission (`homey.system.readonly`)
+- After creating the new API key, update your Home Assistant integration configuration with the new key and restart Home Assistant or reload the Homey integration
+- Without this permission, Socket.IO real-time updates will not work and the integration will fall back to polling
+- The integration will continue to work with polling if the permission is missing, but you won't get instant updates
+
+**What This Really Means:**
+- **Before**: When you turned on a light in Homey, Home Assistant would show the old state until the next poll (up to 10 seconds later)
+- **After**: When you turn on a light in Homey, Home Assistant updates instantly (< 1 second) - the UI reflects reality in real-time
+- **Bidirectional**: Commands sent from Home Assistant to Homey also get instant feedback, so you see the result immediately
+- **Seamless**: If Socket.IO connection fails, the integration automatically falls back to polling (5-10 seconds) - you never lose updates
+- **Efficient**: When Socket.IO is active, polling reduces to 60 seconds (safety net), saving API calls while maintaining reliability
 
 ### Added
+- **Options & Reauth flows**: Update Homey host/IP, API key, and fallback polling settings without reinstalling
+- **Reauthentication flow**: Prompts for a new API key when credentials are invalid
+- **Auto-recovery**: Integration reconnects automatically after Homey restarts or network drops
 
-#### New Device Support
-- **Vacuum Cleaner Support**: Full Home Assistant VacuumEntity integration for Homey vacuum cleaners
-  - Complete state management (cleaning, paused, docked, returning, idle, error)
-  - Battery level monitoring
-  - Start/pause/return to dock controls
-  - Fan speed control (suction power)
-  - Support for all vacuum capabilities including cleaning modes, mop routes, scrub intensity
-  - Compatible with Home Assistant 2026.1+ using `StateVacuumEntity` and `VacuumActivity` enum
-- **Battery Device Support**: Comprehensive support for battery devices (`class: "battery"`)
+### Fixed
+- **Cover position feature**: Use compatible position feature flags to avoid attribute errors on older HA versions
+- **Device selection defaults**: All devices are selected by default in the setup flow
+- **Transient outages**: Prevents device removals when the API temporarily returns no devices
+
+### Changed
+- **Socket.IO logging**: Reduced per-update log noise (kept only key status)
+
+## [1.1.5-dev.8] - 2026-01-13
+
+### Added
+- **Socket.IO Real-Time Updates**: Full support for real-time device updates via Socket.IO
+  - Integration now uses Socket.IO for instant device state updates when available
+  - Device changes in Homey (via app, physical switches, or automations) appear in Home Assistant immediately (< 1 second)
+  - Socket.IO provides bidirectional communication for instant feedback on control commands
+  - Automatic fallback to polling (every 5 seconds) if Socket.IO connection fails or disconnects
+  - Seamless reconnection: Socket.IO automatically reconnects if connection is lost
+  - Connection status clearly logged: INFO when Socket.IO connects, WARNING when it disconnects and polling takes over
+  - Polling continues as backup even when Socket.IO is active, ensuring updates are never missed
+  - Works with both local Homey devices and self-hosted Homey servers
+
+## [1.1.5-dev.7] - 2026-01-13
+
+### Fixed
+- **Indentation Errors**: Fixed additional indentation errors across multiple platform files
+  - Fixed indentation in `device_info.py` for Shelly device detection return statement
+  - Fixed indentation in `cover.py` for garage door position handling and stop operation
+  - Fixed indentation in `sensor.py` for unit assignment
+  - Fixed indentation in `button.py` for button entity creation
+  - Fixed indentation in `homey_api.py` for return statement in windowcoverings_state handling
+  - All Python files now compile without syntax errors
+  - Resolves `IndentationError` issues that could prevent the integration from loading
+
+## [1.1.5-dev.6] - 2026-01-13
+
+### Fixed
+- **Indentation Errors**: Fixed multiple indentation errors across multiple platform files
+  - Fixed indentation in `binary_sensor.py` for entity creation and name assignment
+  - Fixed indentation in `button.py` for button entity creation
+  - Fixed indentation in `config_flow.py` for connector assignment
+  - Fixed indentation in `cover.py` for current_position property
+  - Fixed indentation in `device_info.py` for return statements
+  - Fixed indentation in `homey_api.py` for connector and return statements
+  - Fixed indentation in `sensor.py` for entity creation and unit assignment
+  - Fixed indentation in `switch.py` for capability checks
+  - Resolves potential `IndentationError` issues that could prevent the integration from loading
+
+## [1.1.5-dev.3] - 2026-01-12
+
+### Fixed
+- **Self-Hosted Server SSL Support**: Fixed SSL handling for Homey Self-Hosted Server users
+  - Previously, the integration always disabled SSL (`ssl=False`), causing HTTPS connections to fail
+  - Now properly detects HTTPS URLs and creates appropriate SSL context
+  - SSL certificate verification is disabled for self-signed certificates (common on self-hosted servers)
+  - HTTP connections (local Homey devices) continue to work as before
+  - Users can now use `https://` URLs for self-hosted servers without connection errors
+  - Port numbers in URLs are preserved (e.g., `https://homey.example.com:8443`)
+
+## [1.1.5-dev.2] - 2026-01-12
+
+### Fixed
+- **Indentation Errors**: Fixed multiple indentation errors in `device_info.py` that prevented the integration from loading
+  - Fixed `return "light"` statement indentation (line 69)
+  - Fixed Philips Hue detection `if` statement indentation (line 127)
+  - Fixed Shelly detection `return "switch"` statement indentation (line 143)
+  - Resolves `IndentationError: expected an indented block after 'if' statement`
+
+## [1.1.4-dev.17] - 2026-01-12
+
+### Fixed
+- **Indentation Errors**: Fixed multiple indentation errors in `device_info.py` that prevented the integration from loading
+  - Fixed `return "light"` statement indentation (line 69)
+  - Fixed Philips Hue detection `if` statement indentation (line 127)
+  - Fixed Shelly detection `return "switch"` statement indentation (line 143)
+  - Resolves `IndentationError: expected an indented block after 'if' statement`
+
+## [1.1.4-dev.16] - 2026-01-12
+
+### Added
+- **Devicegroups Plugin Support**: Full support for Homey devicegroups plugin groups
+  - Groups are now detected and handled correctly regardless of their class type
+  - Groups with `class: "light"` create light entities (even with minimal capabilities)
+  - Groups with `class: "fan"` create fan entities (even without `fan_speed`)
+  - Groups with `class: "socket"` or `"switch"` create switch entities
+  - Groups with `class: "heater"` or `"thermostat"` create climate entities (even without `target_temperature`)
+  - Groups with cover-related classes (`windowcoverings`, `cover`, `curtain`, etc.) create cover entities
+  - Groups are identified by `driverId` pattern: `homey:app:com.swttt.devicegroups:*`
+  - Added comprehensive debug logging to help identify when groups are detected
+  - Groups work with any class type and are handled based on their capabilities and class
+
+## [1.1.4-dev.15] - 2026-01-12
+
+### Fixed
+- **Enum-Based Windowcoverings API Validation**: Fixed API validation to accept enum string values ("up", "idle", "down") for `windowcoverings_state`
+  - Previously, the API validation rejected enum strings because it expected numeric values
+  - Now correctly handles both enum-based and numeric `windowcoverings_state` capabilities
+  - Enum-based covers can now be controlled properly (open/close/stop actions work)
+  - Numeric windowcoverings_state devices continue to work as before
+  - Fixes error: "Invalid numeric value for capability windowcoverings_state: up (appears to be a string, not a number)"
+
+## [1.1.4-dev.14] - 2026-01-12
+
+### Fixed
+- **Vacuum Entity Compatibility**: Fixed vacuum entity to work with Home Assistant 2026.1
+  - Changed from deprecated `VacuumEntity` to `StateVacuumEntity`
+  - Replaced deprecated `STATE_*` constants with `VacuumActivity` enum
+  - Changed `state` property to `activity` property (required in HA 2026.1+)
+  - Resolves ImportError and deprecation warnings
+
+## [1.1.4-dev.13] - 2026-01-12
+
+### Fixed
+- **Light Detection for Socket-Class Devices**: Fixed devices with `class: "socket"` that have dimming/color capabilities not being detected as lights
+  - Devices with `onoff` + (`dim` OR `light_hue` OR `light_temperature`) are now correctly detected as lights
+  - Philips Hue and other dimmable devices with socket class now work correctly
+  - Switch platform properly skips devices with light capabilities
+- **Sensor Labeling**: Fixed incorrect labeling of energy sensors
+  - `meter_power` (kWh) sensors now labeled as "Energy" instead of "Power"
+  - `measure_power` (W) sensors remain labeled as "Power"
+  - Improves clarity in Home Assistant UI
+- **Cover Operation**: Improved cover entity operation and debugging
+  - Added explicit handling for `windowcoverings_set` capability (numeric 0-1)
+  - Added debug logging for cover operations (open/close/position)
+  - Better error handling when cover operations fail
+- **Area Assignment**: Fixed user-assigned areas being overwritten by Homey zones
+  - User-manually assigned areas are now preserved and not overwritten
+  - Areas are only updated if they match the Homey zone name (integration-set areas)
+  - Allows users to organize devices in Home Assistant without them reverting
+
+### Added
+- **Battery Device Support**: Added comprehensive support for battery devices (`class: "battery"`)
   - `measure_capacity` → Energy sensor (kWh) for battery capacity
   - `measure_max_charging_power` → Power sensor (W) for max charging power
   - `measure_max_discharging_power` → Power sensor (W) for max discharging power
   - `measure_emergency_power_reserve` → Energy sensor (Wh/kWh) for emergency reserve
-  - `measure_dcbcount` → Sensor for module count
   - All battery capabilities automatically created as sensors with proper device classes
 - **Lawn Mower Support**: Added support for Gardena lawn mowers
   - `gardena_button.park` and `gardena_button.start` buttons now detected
   - Generic button pattern matching for device-specific buttons
   - All Gardena sensors (`gardena_wireless_quality`, `gardena_mower_state`, `gardena_operating_hours`) supported
-- **Heat Pump Support**: Comprehensive support for heat pumps (`class: "heatpump"`)
+- **Heat Pump Support**: Added comprehensive support for heat pumps (`class: "heatpump"`)
   - `target_temperature.*` sub-capabilities (normal, comfort, reduced, dhw, dhw2) → Number entities
   - `operating_program` → Select entity for heating program selection
   - Boolean capabilities (`circulation_pump`, `comfort_program`, `eco_program`, `hot_water`, `compressor_active`) → Binary sensors
   - All temperature sensors (`measure_temperature.*`) automatically created
   - Compressor statistics (`compressor_hours`, `compressor_starts`) as sensors
-- **Solar Panel Support**: Enhanced support for solar panel devices
-  - `measure_grid_delivery` → Power sensor for grid delivery
-  - `measure_battery_delivery` → Power sensor for battery delivery
-  - `measure_house_consumption` → Power sensor for house consumption
-  - `external_power_delivery_connected` → Binary sensor
-  - All solar panel capabilities properly mapped to sensors and binary sensors
-
-#### Enhanced Platform Support
 - **Generic Boolean Binary Sensors**: Added automatic detection of all boolean-type capabilities as binary sensors
   - Previously only `alarm_*` capabilities were auto-detected
   - Now all boolean capabilities (read-only or settable) are detected as binary sensors
   - Excludes button capabilities (handled by button platform)
-- **Universal Sensor Support**: Added generic handling for ALL `measure_*` and `meter_*` capabilities, including unknown ones
-  - Previously only handled explicitly mapped capabilities
-  - Now automatically creates sensor entities for any `measure_*` or `meter_*` capability, even if not in our mapping
-  - Supports sub-capabilities of unknown capabilities (e.g., `measure_temperature.bed`, `measure_storage.free`)
-  - Unknown capabilities are created as generic sensors with automatic naming
-- **Universal Binary Sensor Support**: Added generic handling for ALL `alarm_*` capabilities
-  - Automatically creates binary sensor entities for any `alarm_*` capability
-  - Supports unknown alarm types (e.g., `alarm_heat`, `alarm_restarted`)
-  - Supports sub-capabilities of unknown alarms
 - **Number Entity Pattern Matching**: Added pattern-based detection for number entities
   - `target_temperature.*` sub-capabilities automatically detected as number entities
   - Supports any numeric sub-capability that's settable
+
+### Changed
+- **Light Detection Logging**: Enhanced logging for light entity creation
+  - Now logs device class in addition to capabilities
+  - Added debug logging for devices not detected as lights (for troubleshooting)
+
+## [1.1.4-dev.12] - 2026-01-11
+
+### Fixed
+- **Cover Position Feature Flag**: Fixed `AttributeError` for `CoverEntityFeature.SET_COVER_POSITION`
+  - Changed to correct attribute name: `CoverEntityFeature.POSITION`
+  - Only adds POSITION feature for devices that support numeric position (0-1 range)
+- **Enum-Based Windowcoverings Support**: Added support for enum-based `windowcoverings_state` capabilities
+  - Detects enum-based covers (with values like "up", "idle", "down") vs numeric covers
+  - Maps enum states to positions: "up" = 100%, "down" = 0%, "idle" = 50%
+  - Open/close/stop methods use appropriate enum values for enum-based covers
+  - Position setting only available for numeric covers, not enum-based covers
+
+### Added
 
 #### Energy Dashboard Support
 - **Energy Sensor Compatibility**: Ensured all energy sensors (`meter_power`, `meter_power.imported`, `meter_power.exported`) are compatible with Home Assistant Energy dashboard
@@ -89,9 +221,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Auto-detects currency from price sensors on the same device (e.g., "SEK/kWh" → "SEK")
   - Only normalizes specific currency symbols (€, $, £, etc.), not generic "¤"
   - Leaves unit empty if currency cannot be detected, allowing user customization
-- **Sub-Capability Support**: Enhanced energy sensor support for sub-capabilities
-  - `meter_power.imported` and `meter_power.exported` now have proper energy device class
-  - All `meter_power.*` sub-capabilities use kWh units for Energy dashboard compatibility
 
 #### Custom Thermostat Support
 - **Custom Mode Capabilities**: Added support for custom thermostat mode capabilities (e.g., `thermofloor_mode`)
@@ -110,51 +239,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-#### Home Assistant 2026.1 Compatibility
-- **Vacuum Entity Compatibility**: Fixed vacuum entity to work with Home Assistant 2026.1
-  - Changed from deprecated `VacuumEntity` to `StateVacuumEntity`
-  - Replaced deprecated `STATE_*` constants with `VacuumActivity` enum
-  - Changed `state` property to `activity` property (required in HA 2026.1+)
-  - Resolves ImportError and deprecation warnings
-
-#### Device Detection and Classification
-- **Light Detection for Socket-Class Devices**: Fixed devices with `class: "socket"` that have dimming/color capabilities not being detected as lights
-  - Devices with `onoff` + (`dim` OR `light_hue` OR `light_temperature`) are now correctly detected as lights
-  - Philips Hue and other dimmable devices with socket class now work correctly
-  - Switch platform properly skips devices with light capabilities
-- **Sensor Labeling**: Fixed incorrect labeling of energy sensors
-  - `meter_power` (kWh) sensors now labeled as "Energy" instead of "Power"
-  - `measure_power` (W) sensors remain labeled as "Power"
-  - Improves clarity in Home Assistant UI
-- **Switch Detection**: Fixed switch detection to properly handle sub-capabilities (`onoff.output1`, `onoff.output2`)
-  - Updated `get_device_type` to detect switches with sub-capabilities, not just regular `onoff`
-  - Fixed Shelly and Fibaro device detection to include sub-capabilities
-  - Ensures single and double switches are correctly classified as switches (not sensors)
-- **Multi-Channel Switch Detection**: Enhanced device type detection to properly identify multi-channel switches
-  - Devices with only `onoff.output1` (no regular `onoff`) are now correctly classified as switches
-  - Devices with `onoff.output1` and `onoff.output2` are correctly classified as switches
-  - Works for all brands (Walli, Shelly, Fibaro, etc.), not just specific ones
-- **Syntax Errors**: Fixed indentation errors in `device_info.py` that prevented proper compilation
-
-#### Cover Operation
-- **Cover Position Feature Flag**: Fixed `AttributeError` for `CoverEntityFeature.SET_COVER_POSITION`
-  - Changed to correct attribute name: `CoverEntityFeature.POSITION`
-  - Only adds POSITION feature for devices that support numeric position (0-1 range)
-- **Enum-Based Windowcoverings Support**: Added support for enum-based `windowcoverings_state` capabilities
-  - Detects enum-based covers (with values like "up", "idle", "down") vs numeric covers
-  - Maps enum states to positions: "up" = 100%, "down" = 0%, "idle" = 50%
-  - Open/close/stop methods use appropriate enum values for enum-based covers
-  - Position setting only available for numeric covers, not enum-based covers
-- **Cover Operation Improvements**: Improved cover entity operation and debugging
-  - Added explicit handling for `windowcoverings_set` capability (numeric 0-1)
-  - Better error handling when cover operations fail
-
-#### Area Assignment
-- **User-Assigned Areas**: Fixed user-assigned areas being overwritten by Homey zones
-  - User-manually assigned areas are now preserved and not overwritten
-  - Areas are only updated if they match the Homey zone name (integration-set areas)
-  - Allows users to organize devices in Home Assistant without them reverting
-
 #### Climate Entity Controls
 - **Turn On/Off Support**: Added `turn_on` and `turn_off` support for climate entities
   - Only uses settable on/off capabilities for control (checks `setable: true`)
@@ -165,22 +249,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `thermofloor_onoff` is correctly identified as read-only (status indicator)
   - Read-only capabilities are not used for control, only for status display
 
+#### Sensor Warnings
+- **Reduced Log Noise**: Changed expected warnings to DEBUG level
+  - "Unknown sensor capability" warnings changed to DEBUG (generic sensor creation is expected)
+  - "light_hue without light_saturation" warning changed to DEBUG (expected for some devices)
+
 #### Flow Trigger Service
 - **Entity Selector**: Added `EntitySelector` to `homey.trigger_flow` service
   - Home Assistant now displays a dropdown of available Homey flow button entities
   - Improved error messages with usage examples
   - Extracts `flow_id` from `entity_id`'s `unique_id` automatically
-
-#### Logging Improvements
-- **Reduced Logging Noise**: Removed frequent success logs that were showing every 10 seconds
-  - Removed "Successfully retrieved devices" INFO log
-  - Removed "Successfully retrieved zones" INFO log
-  - Suppressed "Finished fetching Homey data" DEBUG log from coordinator
-  - Changed scenes/moods success logs from INFO to DEBUG
-  - Logs now only show errors or important information, not routine success messages
-- **Reduced Log Noise**: Changed expected warnings to DEBUG level
-  - "Unknown sensor capability" warnings changed to DEBUG (generic sensor creation is expected)
-  - "light_hue without light_saturation" warning changed to DEBUG (expected for some devices)
 
 ### Changed
 
@@ -190,10 +268,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Users can customize the unit in Home Assistant if needed
   - Prevents incorrect currency assumptions
 
-#### Light Detection Logging
-- Enhanced logging for light entity creation
-  - Now logs device class in addition to capabilities
-  - Added debug logging for devices not detected as lights (for troubleshooting)
+#### Energy Sensors
+- **Sub-Capability Support**: Enhanced energy sensor support for sub-capabilities
+  - `meter_power.imported` and `meter_power.exported` now have proper energy device class
+  - All `meter_power.*` sub-capabilities use kWh units for Energy dashboard compatibility
+
+---
+
+## [1.1.4-dev.2] - 2026-01-11
+
+### Added
+
+#### Generic Capability Support
+- **Universal Sensor Support**: Added generic handling for ALL `measure_*` and `meter_*` capabilities, including unknown ones
+  - Previously only handled explicitly mapped capabilities
+  - Now automatically creates sensor entities for any `measure_*` or `meter_*` capability, even if not in our mapping
+  - Supports sub-capabilities of unknown capabilities (e.g., `measure_temperature.bed`, `measure_storage.free`)
+  - Unknown capabilities are created as generic sensors with automatic naming
+- **Universal Binary Sensor Support**: Added generic handling for ALL `alarm_*` capabilities
+  - Automatically creates binary sensor entities for any `alarm_*` capability
+  - Supports unknown alarm types (e.g., `alarm_heat`, `alarm_restarted`)
+  - Supports sub-capabilities of unknown alarms
+
+### Fixed
+
+#### Switch Detection
+- **Sub-Capability Detection**: Fixed switch detection to properly handle sub-capabilities (`onoff.output1`, `onoff.output2`)
+  - Updated `get_device_type` to detect switches with sub-capabilities, not just regular `onoff`
+  - Fixed Shelly and Fibaro device detection to include sub-capabilities
+  - Ensures single and double switches are correctly classified as switches (not sensors)
+- **Syntax Errors**: Fixed indentation errors in `device_info.py` that prevented proper compilation
+
+### Changed
+
+#### Device Classification
+- **Improved Switch Detection**: Enhanced device type detection to properly identify multi-channel switches
+  - Devices with only `onoff.output1` (no regular `onoff`) are now correctly classified as switches
+  - Devices with `onoff.output1` and `onoff.output2` are correctly classified as switches
+  - Works for all brands (Walli, Shelly, Fibaro, etc.), not just specific ones
+
+---
+
+## [1.1.4-dev.1] - 2026-01-11
+
+### Added
+
+#### Multi-Branch Release System
+- **Dev Branch**: Created `dev` branch for development builds with version numbering (e.g., `1.1.4-dev.1`)
+- **Beta Branch**: Created `beta` branch for pre-release testing with version numbering (e.g., `1.1.4-beta.1`)
+- **Release Tags**: Added release tags for beta and dev branches (`v1.1.4-beta.1`, `v1.1.4-dev.1`)
+- **Branch Switching Documentation**: Added comprehensive guide for switching between Stable/Beta/Dev release channels in HACS
+
+### Changed
+
+#### Documentation
+- **Table of Contents**: Updated to include branch switching instructions
+- **HACS Installation Guide**: Added detailed instructions for switching between release channels
 
 ---
 
@@ -552,4 +682,4 @@ When making changes:
 
 ---
 
-**Last Updated**: 2026-01-08
+**Last Updated**: 2026-01-15

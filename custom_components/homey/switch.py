@@ -34,13 +34,26 @@ async def async_setup_entry(
     # Filter devices if device_filter is configured
     from . import filter_devices
     devices = filter_devices(devices, entry.data.get("device_filter"))
-    
+
     _LOGGER.info("Checking %d devices for switch capabilities", len(devices))
 
     for device_id, device in devices.items():
         capabilities = device.get("capabilitiesObj", {})
         driver_uri = device.get("driverUri")
+        driver_id = device.get("driverId", "")
         device_class = device.get("class")
+        device_name = device.get("name", "Unknown")
+        
+        # Check if this is a devicegroups group
+        is_devicegroups_group = driver_id.startswith("homey:app:com.swttt.devicegroups:")
+        if is_devicegroups_group:
+            _LOGGER.debug(
+                "Found devicegroups group in switch platform: %s (id: %s, class: %s, driverId: %s)",
+                device_name,
+                device_id,
+                device_class,
+                driver_id
+            )
         
         # Check for onoff capabilities (both regular and sub-capabilities like onoff.output1)
         # Multi-channel devices (e.g., Shelly Plus 2 PM, Fibaro Double Switch) use sub-capabilities
@@ -77,15 +90,23 @@ async def async_setup_entry(
             for cap in ["volume_set", "speaker_playing", "speaker_next"]
         )
         
-        # Only create switch if it's not a specialized device type
+        # Special handling for devicegroups groups: respect their class
+        # If a group has class "socket" or "switch", treat it as a switch
+        is_devicegroups_switch = (
+            is_devicegroups_group 
+            and device_class in ["socket", "switch"]
+        )
+            
+            # Only create switch if it's not a specialized device type
         # Note: Having sensor capabilities (like measure_power) does NOT exclude switch creation
         # Devices can have both switch and sensor entities
-        if not (
-            has_light_capabilities
-            or has_fan_capabilities
-            or has_cover_capabilities
-            or has_media_capabilities
-        ):
+        # Exception: devicegroups groups with class "socket" or "switch" should always be switches
+        if is_devicegroups_switch or not (
+                has_light_capabilities
+                or has_fan_capabilities
+                or has_cover_capabilities
+                or has_media_capabilities
+            ):
             # Create switch entity for each onoff capability
             # For multi-channel devices, this creates multiple switch entities
             for onoff_cap in onoff_capabilities:

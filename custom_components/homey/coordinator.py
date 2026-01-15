@@ -1,12 +1,15 @@
 """Data update coordinator for Homey."""
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 import logging
+import time
 from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import CONF_DEVICE_FILTER, DOMAIN
@@ -24,14 +27,36 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         api: HomeyAPI,
         zones: dict[str, dict[str, Any]] | None = None,
         update_interval: timedelta | None = None,
+        recovery_cooldown: int | None = None,
     ) -> None:
         """Initialize the coordinator."""
         if update_interval is None:
-            update_interval = timedelta(seconds=10)  # Reduced from 30s to 10s for better responsiveness
+            # Polling interval: 5-10 seconds is a good balance between responsiveness and system load
+            # Socket.IO provides instant updates for supported devices, but Homey may not send Socket.IO events
+            # for device changes (affects all device types, not just Zigbee)
+            # With 141 devices, polling every 1 second overwhelms the WebSocket API
+            # Default to 5 seconds, but will adjust to 5-10 seconds when Socket.IO fails
+            update_interval = timedelta(seconds=5)  # 5 seconds - reasonable for UI updates without overwhelming the system
+            # Note: Socket.IO real-time updates are enabled if available
+            # If Socket.IO fails or doesn't send events, polling will be used (5-10 seconds)
+            # Changes made via Homey app will appear within 5-10 seconds via polling (or instantly via Socket.IO if supported)
+        
+        # Create a logger filter to suppress the "Finished fetching" DEBUG messages
+        # The base DataUpdateCoordinator logs these every update, which is too verbose
+        import logging
+        
+        class SuppressFinishedFetchingFilter(logging.Filter):
+            """Filter to suppress 'Finished fetching' DEBUG messages."""
+            def filter(self, record):
+                return "Finished fetching" not in record.getMessage()
+        
+        # Get the logger and add filter
+        coordinator_logger = logging.getLogger(__name__)
+        coordinator_logger.addFilter(SuppressFinishedFetchingFilter())
         
         super().__init__(
             hass,
-            _LOGGER,
+            coordinator_logger,
             name="Homey",
             update_interval=update_interval,
         )
@@ -39,24 +64,115 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self.hass = hass
         self.zones = zones or {}
         self._previous_device_ids: set[str] = set()
+        self._last_recovery_attempt: float = 0.0
+        self._recovery_cooldown: int = recovery_cooldown or 300  # seconds
+        self._fallback_poll_interval: int = (
+            update_interval.seconds if update_interval else 10
+        )
+        
+        # Conditional batching: only batch when multiple updates arrive rapidly
+        # Single updates process immediately for instant UI response
+        self._pending_sio_updates: dict[str, dict[str, Any]] = {}
+        self._sio_update_task: Any = None
+        self._sio_batch_delay = 0.015  # 15ms delay for batched updates (only when multiple updates)
 
         # Register for real-time updates
         self.api.add_device_listener(self._on_device_update)
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
-        """Fetch data from Homey."""
+        """Fetch data from Homey.
+        
+        Note: This method always uses polling. If Socket.IO is connected, it will
+        provide real-time updates via the listener system, but polling continues
+        as a fallback to ensure data consistency.
+        """
+        update_start = time.time()
         try:
-            # Refresh zones periodically (every 10 updates = ~5 minutes)
+            # Refresh zones periodically (every 20 updates = ~100 seconds / ~1.7 minutes)
             if not hasattr(self, "_zone_update_count"):
                 self._zone_update_count = 0
             
             self._zone_update_count += 1
-            if self._zone_update_count >= 10:
+            if self._zone_update_count >= 20:
                 self.zones = await self.api.get_zones() or {}
                 self._zone_update_count = 0
                 _LOGGER.debug("Refreshed zones from Homey")
             
+            # Periodically check Socket.IO status and adjust polling interval accordingly
+            # When Socket.IO is connected, reduce polling frequency (use as safety net only)
+            # When Socket.IO is disconnected, use normal polling frequency (5-10 seconds)
+            if hasattr(self.api, '_sio_connected'):
+                if not self.api._sio_connected:
+                    # Socket.IO disconnected - use fallback polling interval (5-10 seconds)
+                    # Use configured fallback to reduce API load while still being responsive
+                    if self.update_interval != timedelta(seconds=self._fallback_poll_interval):
+                        _LOGGER.debug(
+                            "Socket.IO disconnected - switching to fallback polling (%d second interval)",
+                            self._fallback_poll_interval,
+                        )
+                        self.update_interval = timedelta(seconds=self._fallback_poll_interval)
+                    # Log status check only once per session (not every poll)
+                    if not hasattr(self, "_sio_status_logged"):
+                        _LOGGER.debug(
+                            "Socket.IO status: DISCONNECTED - using fallback polling (%d second interval)",
+                            self._fallback_poll_interval,
+                        )
+                        _LOGGER.debug("Reconnection attempts will continue in background")
+                        self._sio_status_logged = True
+                    # Trigger reconnection attempt (will happen in background)
+                    self.api._start_sio_reconnect_task()
+                else:
+                    # Socket.IO is connected - reduce polling to safety net interval (60 seconds)
+                    if self.update_interval != timedelta(seconds=60):
+                        _LOGGER.debug("Socket.IO connected - reducing polling to safety net (60 second interval)")
+                        self.update_interval = timedelta(seconds=60)
+                        # Reset status logged flag so we log again if it disconnects
+                        if hasattr(self, "_sio_status_logged"):
+                            delattr(self, "_sio_status_logged")
+                    # Socket.IO is connected - check if we've received any events
+                    # Note: This is just informational - Socket.IO stays connected regardless
+                    if not hasattr(self.api, "_sio_first_event_logged"):
+                        # Connected but no events received yet - log this once after a longer delay
+                        # Give user time to test (30 seconds = 6 polls at 5s interval, or 30s at 60s interval)
+                        if not hasattr(self, "_sio_no_events_logged"):
+                            # Wait a bit before logging (give it time to receive events and for user to test)
+                            if not hasattr(self, "_sio_check_count"):
+                                self._sio_check_count = 0
+                            self._sio_check_count += 1
+                            # Log after 30 seconds if still no events (informational only - Socket.IO stays connected)
+                            # This is just to help diagnose if Homey isn't sending events
+                            check_threshold = 6 if self.update_interval == timedelta(seconds=5) else 1  # 6 polls at 5s = 30s, or 1 poll at 60s = 60s
+                            if self._sio_check_count >= check_threshold:
+                                _LOGGER.debug("Socket.IO connected but no events received yet (this is normal - events arrive when devices change)")
+                                _LOGGER.debug("To test: Change a device in Homey app and watch for events in logs")
+                                _LOGGER.debug("Socket.IO connection remains active - polling continues as safety net")
+                                self._sio_no_events_logged = True
+                    else:
+                        # Events are arriving - reset counters
+                        if hasattr(self, "_sio_no_events_logged"):
+                            delattr(self, "_sio_no_events_logged")
+                        if hasattr(self, "_sio_check_count"):
+                            delattr(self, "_sio_check_count")
+                    # Reset status log flag if reconnected
+                    if hasattr(self, "_sio_status_logged"):
+                        self._sio_status_logged = False
+            
             devices = await self.api.get_devices()
+            
+            # If we suddenly get no devices after previously having data,
+            # try a one-time recovery (Homey reboot/network blip).
+            if not devices and self._previous_device_ids:
+                if self._should_attempt_recovery():
+                    _LOGGER.warning(
+                        "No devices returned from Homey API - attempting automatic reconnect"
+                    )
+                    await self._attempt_api_recovery()
+                    devices = await self.api.get_devices()
+                if not devices:
+                    _LOGGER.warning(
+                        "No devices returned from Homey API - keeping last known devices"
+                    )
+                    return self.data or {}
             
             # Update device registry for name/room changes
             await self._update_device_registry(devices)
@@ -71,9 +187,70 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             
             self._previous_device_ids = current_device_ids
             
+            update_duration = time.time() - update_start
+            # Only log debug info on errors or if update takes unusually long (>1 second)
+            if update_duration > 1.0:
+                _LOGGER.debug("Device update took %.2f seconds, fetched %d devices", update_duration, len(devices))
+            
             return devices
         except Exception as err:
+            if isinstance(err, ConfigEntryAuthFailed):
+                raise
+            if self._should_attempt_recovery():
+                _LOGGER.warning(
+                    "Polling error from Homey API - attempting automatic reconnect: %s",
+                    err,
+                )
+                await self._attempt_api_recovery()
+                try:
+                    devices = await self.api.get_devices()
+                    if devices:
+                        await self._update_device_registry(devices)
+                        current_device_ids = set(devices.keys())
+                        deleted_device_ids = self._previous_device_ids - current_device_ids
+                        if deleted_device_ids:
+                            await self._remove_deleted_devices(deleted_device_ids)
+                        self._previous_device_ids = current_device_ids
+                        update_duration = time.time() - update_start
+                        if update_duration > 1.0:
+                            _LOGGER.debug(
+                                "Device update took %.2f seconds, fetched %d devices",
+                                update_duration,
+                                len(devices),
+                            )
+                        return devices
+                except ConfigEntryAuthFailed:
+                    raise
+                except Exception as recovery_err:
+                    _LOGGER.debug(
+                        "Polling recovery fetch failed: %s",
+                        recovery_err,
+                    )
+            _LOGGER.error("Polling failed - error communicating with Homey: %s", err)
             raise UpdateFailed(f"Error communicating with Homey: {err}") from err
+
+    def _should_attempt_recovery(self) -> bool:
+        """Check if enough time has passed to attempt API recovery."""
+        now = time.time()
+        if now - self._last_recovery_attempt < self._recovery_cooldown:
+            return False
+        self._last_recovery_attempt = now
+        return True
+
+    async def _attempt_api_recovery(self) -> None:
+        """Attempt to re-establish API connection after errors."""
+        recovered = False
+        try:
+            await self.api.disconnect()
+        except Exception as err:
+            _LOGGER.debug("Failed to disconnect Homey API cleanly: %s", err)
+        try:
+            await self.api.connect()
+            recovered = await self.api.authenticate()
+        except Exception as err:
+            _LOGGER.debug("Homey API recovery attempt failed: %s", err)
+        if recovered:
+            _LOGGER.info("Homey API recovery successful - devices should repopulate shortly")
 
     async def _assign_areas_to_devices(self) -> None:
         """Assign areas to devices based on Homey zones during initial setup."""
@@ -315,22 +492,122 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     _LOGGER.info("Removed unselected device from registry: %s", device_id)
 
     def _on_device_update(self, device_id: str, data: dict[str, Any]) -> None:
-        """Handle device update from Socket.IO."""
-        # Update the coordinator data immediately
-        if self.data:
-            if device_id in self.data:
-                self.data[device_id].update(data)
+        """Handle device update from Socket.IO.
+        
+        This is called from Socket.IO callbacks which may run in a different thread.
+        Uses conditional batching: single updates process immediately, multiple rapid updates are batched.
+        Matches async_refresh_device behavior by using async tasks instead of synchronous callbacks.
+        """
+        if not self.hass.is_running:
+            # Fallback: if HA isn't running yet, just update synchronously
+            if self.data:
+                if device_id in self.data:
+                    self.data[device_id].update(data)
+                else:
+                    self.data[device_id] = data
+                self.async_update_listeners()
+            return
+        
+        # Store the latest update for this device (thread-safe dict access)
+        self._pending_sio_updates[device_id] = data
+        
+        # Schedule task creation in the event loop thread (thread-safe)
+        def schedule_update_task():
+            """Schedule async task in the event loop thread."""
+            # Check if there's already a pending batch task
+            if self._sio_update_task and not self._sio_update_task.done():
+                # Multiple updates arriving rapidly - cancel and reschedule with batching
+                self._sio_update_task.cancel()
+                self._sio_update_task = self.hass.async_create_task(
+                    self._async_process_batched_sio_updates()
+                )
             else:
-                self.data[device_id] = data
-            # Notify listeners
+                # Single update or first update - process immediately using async task
+                # This matches async_refresh_device behavior (async context)
+                if len(self._pending_sio_updates) == 1:
+                    # Only one update, process immediately in async context
+                    self._sio_update_task = self.hass.async_create_task(
+                        self._async_process_sio_update_immediate()
+                    )
+                else:
+                    # Multiple updates queued, batch them
+                    self._sio_update_task = self.hass.async_create_task(
+                        self._async_process_batched_sio_updates()
+                    )
+        
+        # Schedule task creation in the event loop thread (thread-safe)
+        self.hass.loop.call_soon_threadsafe(schedule_update_task)
+    
+    async def _async_process_sio_update_immediate(self) -> None:
+        """Process Socket.IO update immediately in async context (matches async_refresh_device)."""
+        if not self._pending_sio_updates or not self.data:
+            return
+        
+        # Log Socket.IO update for debugging
+        import time
+        update_start = time.time()
+        device_ids = list(self._pending_sio_updates.keys())
+        
+        # Update coordinator data with pending update
+        # This matches exactly what async_refresh_device does
+        for update_device_id, update_data in self._pending_sio_updates.items():
+            if update_device_id in self.data:
+                self.data[update_device_id].update(update_data)
+            else:
+                self.data[update_device_id] = update_data
+        
+        # Clear pending updates
+        self._pending_sio_updates.clear()
+        
+        # Notify listeners immediately (same as async_refresh_device)
+        # Being in async context ensures callbacks execute immediately
+        self.async_update_listeners()
+        
+        # Log Socket.IO update timing
+        update_duration = time.time() - update_start
+        _LOGGER.debug(
+            "Socket.IO update processed for device(s) %s in %.3f seconds - UI should update immediately",
+            ", ".join(device_ids[:3]) + ("..." if len(device_ids) > 3 else ""),
+            update_duration
+        )
+    
+    async def _async_process_batched_sio_updates(self) -> None:
+        """Process batched Socket.IO updates after a short delay (for rapid successive updates)."""
+        try:
+            # Wait a short delay to batch rapid updates
+            await asyncio.sleep(self._sio_batch_delay)
+            
+            # Process all pending updates (same as immediate processing)
+            if not self._pending_sio_updates or not self.data:
+                return
+            
+            # Update coordinator data with all pending updates
+            for update_device_id, update_data in self._pending_sio_updates.items():
+                if update_device_id in self.data:
+                    self.data[update_device_id].update(update_data)
+                else:
+                    self.data[update_device_id] = update_data
+            
+            # Clear pending updates
+            self._pending_sio_updates.clear()
+            
+            # Notify listeners (in async context, callbacks execute immediately)
             self.async_update_listeners()
+        except asyncio.CancelledError:
+            # Task was cancelled - this is expected when new updates arrive
+            # The next scheduled task will process the pending updates
+            pass
     
     async def async_refresh_device(self, device_id: str) -> None:
         """Immediately refresh a specific device's state from Homey API.
         
         This is called after setting a capability value to get immediate feedback
         instead of waiting for the next polling interval.
+        
+        Note: This only works for changes made via Home Assistant. Changes made via
+        the Homey app will only be detected during the next polling cycle (every 5 seconds).
         """
+        refresh_start = time.time()
         try:
             device_data = await self.api.get_device(device_id)
             if device_data and self.data:
@@ -338,7 +615,8 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 self.data[device_id] = device_data
                 # Notify listeners immediately
                 self.async_update_listeners()
-                _LOGGER.debug("Immediately refreshed device %s", device_id)
+                refresh_duration = time.time() - refresh_start
+                _LOGGER.debug("Immediately refreshed device %s in %.2f seconds", device_id, refresh_duration)
         except Exception as err:
             _LOGGER.debug("Error refreshing device %s: %s", device_id, err)
             # Fall back to regular refresh request

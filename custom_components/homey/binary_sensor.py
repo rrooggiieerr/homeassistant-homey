@@ -110,9 +110,9 @@ async def async_setup_entry(
                 continue
             
             # Create binary sensor for this boolean capability
-            entities.append(
-                HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones)
-            )
+                entities.append(
+                    HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones)
+                )
 
     async_add_entities(entities)
 

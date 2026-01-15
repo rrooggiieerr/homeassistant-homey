@@ -1,12 +1,17 @@
 """Homey API client."""
 from __future__ import annotations
 
+import asyncio
 import logging
+import ssl
 from collections.abc import Callable
 from typing import Any
 
 import aiohttp
 import socketio
+from urllib.parse import quote
+
+from homeassistant.exceptions import ConfigEntryAuthFailed
 
 from .const import (
     API_BASE_V1,
@@ -35,30 +40,50 @@ class HomeyAPI:
         self.token = token
         self.preferred_endpoint = preferred_endpoint  # "manager" or "v1"
         self.session: aiohttp.ClientSession | None = None
-        self.sio: socketio.AsyncClient | None = None
+        self.sio: socketio.AsyncClient | None = None  # Single client for both root and /api namespace
+        self.homey_id: str | None = None  # Homey device ID for Socket.IO authentication
+        self.sio_namespace: str | None = None  # Namespace received from handshakeClient
+        self.sio_token: str | None = None  # Token received from handshakeClient (used for Socket.IO auth)
+        self._api_connected_evt: asyncio.Event | None = None  # Event to track /api namespace connection
+        self._api_connect_error: Any = None  # Store /api namespace connect error if any
+        self._sio_connecting: bool = False  # Flag to prevent reconnect during connection setup
         self.devices: dict[str, dict[str, Any]] = {}
         self.flows: dict[str, dict[str, Any]] = {}
         self.zones: dict[str, dict[str, Any]] = {}  # Rooms/zones
         self.scenes: dict[str, dict[str, Any]] = {}  # Scenes
         self.moods: dict[str, dict[str, Any]] = {}  # Moods
         self._listeners: list[Callable[[str, dict[str, Any]], None]] = []
+        self._sio_connected: bool = False
+        self._sio_reconnect_task: asyncio.Task | None = None
+        self._sio_reconnect_interval: int = 60  # Try to reconnect every 60 seconds
+        self._sio_last_reconnect_attempt: float = 0
+        self._polling_logged: bool = False  # Track if we've logged polling status
 
     async def connect(self) -> None:
         """Connect to Homey API."""
-        # Use SSL=False for local Homey API
-        connector = aiohttp.TCPConnector(ssl=False)
+        # Detect if using HTTPS for SSL handling
+        # For HTTPS connections (self-hosted servers), we need SSL but disable verification for self-signed certs
+        # For HTTP connections (local Homey), disable SSL entirely
+        use_https = self.host.startswith("https://")
+        if use_https:
+            # For HTTPS: create SSL context that doesn't verify certificates (for self-signed certs)
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+        else:
+            # For HTTP: disable SSL entirely
+            connector = aiohttp.TCPConnector(ssl=False)
         self.session = aiohttp.ClientSession(
             connector=connector,
             headers={"Authorization": f"Bearer {self.token}"},
             timeout=aiohttp.ClientTimeout(total=30),
         )
 
-        # Socket.IO is optional - we'll use polling if it's not available
-        # According to Homey API docs, Socket.IO requires handshakeClient event with session token
-        # This is complex to implement, so we'll skip it for now and use polling instead
-        # Real-time updates can be added later if needed
+        # Socket.IO connection will be established after authentication
+        # We need homeyId from system info first, so Socket.IO is initialized later
         self.sio = None
-        _LOGGER.debug("Socket.IO disabled - using polling for updates")
+        self._sio_connected = False
 
     async def authenticate(self) -> bool:
         """Authenticate with Homey API."""
@@ -66,9 +91,11 @@ class HomeyAPI:
             return False
 
         # Try multiple possible system endpoints
+        # Note: /api/manager/system works (returns cloudId), /api/manager/system/info returns 404
         endpoints_to_try = [
-            API_SYSTEM,  # /api/manager/system/info
-            f"{API_BASE_MANAGER}/system",
+            f"{API_BASE_MANAGER}/system",  # /api/manager/system - this works and returns cloudId
+            f"{API_BASE_MANAGER}/system/",  # /api/manager/system/ - with trailing slash
+            API_SYSTEM,  # /api/manager/system/info - fallback
             f"{API_BASE_V1}/manager/system/info",
             f"{API_BASE_V1}/manager/system",
             f"{API_BASE_V1}/system/info",
@@ -80,7 +107,25 @@ class HomeyAPI:
                 async with self.session.get(f"{self.host}{endpoint}") as response:
                     if response.status == 200:
                         system_info = await response.json()
-                        _LOGGER.info("Connected to Homey: %s", system_info.get("name") or system_info.get("homeyName"))
+                        # Store homeyId for Socket.IO authentication
+                        # Try multiple possible fields: cloudId (from system.getInfo()), id, homeyId
+                        self.homey_id = (
+                            system_info.get("cloudId") or 
+                            system_info.get("id") or 
+                            system_info.get("homeyId")
+                        )
+                        _LOGGER.info("Connected to Homey: %s (ID: %s)", 
+                                   system_info.get("name") or system_info.get("homeyName") or system_info.get("hostname", "").split(".")[0],
+                                   self.homey_id or "unknown")
+                        # Attempt Socket.IO connection after successful authentication
+                        # This is non-blocking - if it fails, we'll use polling
+                        _LOGGER.info("Attempting Socket.IO connection for real-time updates...")
+                        try:
+                            success = await self._connect_socketio()
+                            if not success:
+                                _LOGGER.info("Socket.IO connection failed - will use polling (1 second interval)")
+                        except Exception as err:
+                            _LOGGER.error("Socket.IO connection attempt failed with exception: %s - will use polling", err, exc_info=True)
                         return True
                     elif response.status == 404:
                         _LOGGER.debug("Endpoint %s not found, trying next...", endpoint)
@@ -148,8 +193,13 @@ class HomeyAPI:
                         else:
                             # If it's an array, convert to dict keyed by id
                             self.devices = {device["id"]: device for device in devices_data}
-                        _LOGGER.info("Successfully retrieved devices using endpoint: %s", endpoint)
+                        # Only log once at startup, then silently poll
+                        if not self._polling_logged:
+                            _LOGGER.info("Polling working - successfully retrieved %d devices using endpoint: %s", len(self.devices), endpoint)
+                            self._polling_logged = True
                         return self.devices
+                    elif response.status == 401:
+                        raise ConfigEntryAuthFailed("Invalid API key")
                     elif response.status == 404:
                         _LOGGER.debug("Endpoint %s not found, trying next...", endpoint)
                         continue
@@ -160,7 +210,11 @@ class HomeyAPI:
                 _LOGGER.debug("Error getting devices from %s: %s", endpoint, err)
                 continue
         
-        _LOGGER.error("Failed to get devices from any endpoint")
+        # Log error if polling was previously working, or if this is the first attempt
+        if self._polling_logged:
+            _LOGGER.error("Polling failed - unable to retrieve devices from any endpoint")
+        else:
+            _LOGGER.error("Failed to retrieve devices from any endpoint")
         return {}
 
     async def get_device(self, device_id: str) -> dict[str, Any] | None:
@@ -368,11 +422,41 @@ class HomeyAPI:
                 _LOGGER.warning("Cannot convert %s to boolean for capability %s", value, capability_id)
                 return None
         
+        # Handle windowcoverings_state specially - can be enum ("up", "idle", "down") or numeric (0-1)
+        if capability_id == "windowcoverings_state":
+            # Check if it's an enum string value first
+            if isinstance(value, str):
+                value_stripped = value.strip().lower()
+                # Valid enum values for windowcoverings_state
+                if value_stripped in ("up", "idle", "down"):
+                    return value_stripped  # Return the enum string as-is
+            
+            # If not an enum string, treat as numeric (for numeric windowcoverings_state devices)
+            if isinstance(value, (int, float)):
+                return float(value)
+            
+            if isinstance(value, str):
+                value_stripped = value.strip()
+                # Try to convert to float for numeric windowcoverings_state
+                if value_stripped.replace(".", "").replace("-", "").isdigit():
+                    try:
+                        return float(value_stripped)
+                    except (ValueError, TypeError):
+                        pass
+            
+            # If we get here, it's neither a valid enum nor a valid number
+            _LOGGER.warning(
+                "Invalid value for capability %s: %s (must be 'up', 'idle', 'down', or a number)",
+                capability_id,
+                value[:50] if len(str(value)) > 50 else value,
+            )
+            return None
+        
         # Handle numeric capabilities - reject non-numeric strings
         numeric_capabilities = [
             "dim", "light_hue", "light_saturation", "light_temperature",
             "target_temperature", "measure_temperature", "fan_speed",
-            "volume_set", "windowcoverings_state",
+            "volume_set",
         ]
         
         if capability_id in numeric_capabilities:
@@ -950,20 +1034,967 @@ class HomeyAPI:
         _LOGGER.error("Failed to disable flow %s", flow_id)
         return False
 
-    async def _on_device_update(self, data: dict[str, Any]) -> None:
-        """Handle device update from Socket.IO."""
-        device_id = data.get("id")
+    def _handle_socketio_event(self, event_name: str, *args: Any) -> None:
+        """Route Socket.IO events by event name.
+        
+        Args:
+            event_name: Event name (e.g., "homey:manager:devices", "homey:device:<id>")
+            *args: Event arguments - Homey sends (event_type, data) for manager events
+        """
+        _LOGGER.debug("📥 HOMEY EVENT uri=%s args_count=%d", event_name, len(args))
+        
+        # Route by event name
+        if event_name == "homey:manager:devices":
+            # Manager-level event - Homey sends (event_type, data) where event_type is like "device.update"
+            if args and len(args) >= 2:
+                event_type = args[0] if isinstance(args[0], str) else None
+                data = args[1] if isinstance(args[1], dict) else (args[0] if isinstance(args[0], dict) else {})
+                _LOGGER.debug("📥 HOMEY EVENT uri=homey:manager:devices event=%s data=%s", event_type, str(data)[:500])
+                if event_type:
+                    self._on_sio_manager_event(event_type, data)
+                else:
+                    # Fallback: treat as manager event
+                    self._on_sio_manager_event("manager", data)
+            elif args and len(args) == 1:
+                # Single arg - might be data only
+                data = args[0] if isinstance(args[0], dict) else {}
+                _LOGGER.debug("📥 HOMEY EVENT uri=homey:manager:devices (single arg) data=%s", str(data)[:500])
+                self._on_sio_manager_event("manager", data)
+        elif event_name.startswith("homey:device:"):
+            # Device-specific URI event - extract device ID from URI
+            # Homey sends (event_type, data) for device events too
+            device_id = event_name.replace("homey:device:", "")
+            if args and len(args) >= 2:
+                event_type = args[0] if isinstance(args[0], str) else None
+                data = args[1] if isinstance(args[1], dict) else (args[0] if isinstance(args[0], dict) else {})
+                _LOGGER.debug("📥 HOMEY EVENT uri=%s device_id=%s event=%s data=%s", event_name, device_id, event_type, str(data)[:500])
+                self._on_device_update(device_id, data)
+            elif args and len(args) == 1:
+                data = args[0] if isinstance(args[0], dict) else {}
+                _LOGGER.debug("📥 HOMEY EVENT uri=%s device_id=%s (single arg) data=%s", event_name, device_id, str(data)[:500])
+                self._on_device_update(device_id, data)
+        elif event_name == "homey:manager:capability":
+            # Capability event - Homey sends (event_type, data)
+            if args and len(args) >= 2:
+                event_type = args[0] if isinstance(args[0], str) else None
+                data = args[1] if isinstance(args[1], dict) else (args[0] if isinstance(args[0], dict) else {})
+                _LOGGER.debug("📥 HOMEY EVENT uri=homey:manager:capability event=%s data=%s", event_type, str(data)[:500])
+                device_id = data.get("deviceId") or data.get("device", {}).get("id")
+                if device_id:
+                    self._on_device_update(device_id, data)
+            elif args and len(args) == 1:
+                data = args[0] if isinstance(args[0], dict) else {}
+                _LOGGER.debug("📥 HOMEY EVENT uri=homey:manager:capability (single arg) data=%s", str(data)[:500])
+                device_id = data.get("deviceId") or data.get("device", {}).get("id")
+                if device_id:
+                    self._on_device_update(device_id, data)
+        else:
+            # Unknown event - log and try to process as device event
+            _LOGGER.debug("📥 HOMEY EVENT (unknown) uri=%s payload=%s", event_name, str(args)[:500])
+            if args:
+                self._on_sio_device_event(*args)
+    
+    def _on_device_update(self, device_id: str, data: dict[str, Any]) -> None:
+        """Handle device update from Socket.IO or polling.
+        
+        Args:
+            device_id: Device ID
+            data: Device data dictionary (may be partial update like capability change)
+        """
         if device_id:
-            # Update local device cache
+            # Update local device cache - merge with existing data
             if device_id in self.devices:
+                # Merge capability updates into existing capabilitiesObj
+                if "capabilitiesObj" in data:
+                    existing_caps = self.devices[device_id].get("capabilitiesObj", {})
+                    # Deep merge: update existing capability values
+                    for cap_id, cap_data in data["capabilitiesObj"].items():
+                        if cap_id in existing_caps:
+                            existing_caps[cap_id].update(cap_data)
+                        else:
+                            existing_caps[cap_id] = cap_data
+                    # Ensure the merged capabilitiesObj is in the update
+                    data["capabilitiesObj"] = existing_caps
+                # Merge the update into existing device data
                 self.devices[device_id].update(data)
-            # Notify listeners
+            else:
+                self.devices[device_id] = data
+            # Notify listeners (this triggers coordinator updates)
             for listener in self._listeners:
                 try:
                     if callable(listener):
                         listener(device_id, data)
                 except Exception as err:
                     _LOGGER.error("Error in device update listener: %s", err)
+
+    async def _connect_socketio(self) -> bool:
+        """Connect to Homey Socket.IO server for real-time updates.
+        
+        Uses ONE AsyncClient and reuses the same Engine.IO connection for both root and /api namespace.
+        This matches the working HTML test pattern (JS reuses the same WebSocket connection).
+        
+        Flow:
+        1. Connect to root namespace /
+        2. Call handshakeClient to get namespace token
+        3. Manually send Socket.IO namespace connect packet to /api on SAME connection
+        4. Subscribe to events on /api namespace
+        
+        Returns True if Socket.IO connection is established, False otherwise.
+        Falls back to polling if Socket.IO fails.
+        """
+        if self._sio_connected and self.sio:
+            _LOGGER.info("Socket.IO already connected - skipping connection attempt")
+            return True
+        
+        _LOGGER.info("=" * 60)
+        _LOGGER.info("Socket.IO Connection Test - Starting")
+        _LOGGER.info("=" * 60)
+        
+        try:
+            # Determine Socket.IO base URL (strip any path like /api from host)
+            # Use yarl.URL to properly extract scheme/host/port only
+            from yarl import URL
+            
+            raw_url = URL(self.host.rstrip("/"))
+            base_url = str(raw_url.with_path("").with_query(None))
+            
+            _LOGGER.debug("  → Original host: %s", self.host)
+            _LOGGER.debug("  → Base URL (no path): %s", base_url)
+            
+            # Detect SSL for Socket.IO
+            use_https = base_url.startswith("https://")
+            
+            # Create aiohttp connector with SSL configuration
+            if use_https:
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+                connector = aiohttp.TCPConnector(ssl=ssl_context)
+            else:
+                connector = aiohttp.TCPConnector(ssl=False)
+            
+            # Create aiohttp session with the connector
+            http_session = aiohttp.ClientSession(connector=connector)
+            
+            # Disable verbose logging from socketio library
+            import logging
+            sio_logger = logging.getLogger("socketio")
+            sio_logger.setLevel(logging.WARNING)
+            engineio_logger = logging.getLogger("engineio")
+            engineio_logger.setLevel(logging.WARNING)
+            
+            # Set flag to prevent reconnect during connection setup
+            self._sio_connecting = True
+            
+            # Step 1: Create single client and connect ONLY to root namespace
+            _LOGGER.debug("Step 1/5: Creating Socket.IO client and connecting to root namespace")
+            self.sio = socketio.AsyncClient(
+                http_session=http_session,
+                logger=False,
+                engineio_logger=False,
+            )
+            
+            # Set up namespace-specific event handlers for root namespace
+            def on_root_connect():
+                _LOGGER.debug("✅ Root namespace / connected")
+            
+            def on_root_disconnect():
+                _LOGGER.debug("⚠️ Root namespace / disconnected")
+            
+            def on_root_connect_error(data):
+                _LOGGER.error("❌ Root namespace / connect_error: %s", data)
+            
+            self.sio.on("connect", on_root_connect, namespace="/")
+            self.sio.on("disconnect", on_root_disconnect, namespace="/")
+            self.sio.on("connect_error", on_root_connect_error, namespace="/")
+            
+            _LOGGER.debug("  → Connecting to %s (root namespace ONLY)", base_url)
+            await self.sio.connect(
+                base_url,  # http://192.168.1.32 (no token, no /api path)
+                transports=["websocket"],
+                wait_timeout=10,
+                namespaces=["/"],  # CRITICAL: Only root namespace
+            )
+            
+            await asyncio.sleep(0.5)  # Brief pause for connection to establish
+            
+            if not self.sio.connected:
+                _LOGGER.error("Step 1/5: FAILED - Root namespace connection failed")
+                _LOGGER.info("=" * 60)
+                _LOGGER.info("Socket.IO Connection Test - FAILED")
+                _LOGGER.info("Will use polling (1 second interval) for updates")
+                _LOGGER.info("=" * 60)
+                self._sio_connecting = False  # Clear flag before disconnect
+                await self._disconnect_socketio()
+                return False
+            
+            _LOGGER.debug("Step 1/5: SUCCESS - Root namespace connected")
+            
+            # Step 2: Authenticate with handshakeClient on root namespace
+            _LOGGER.debug("Step 2/5: Authenticating Socket.IO connection (handshakeClient)")
+            auth_success = await self._authenticate_socketio()
+            if not auth_success:
+                _LOGGER.warning("Step 2/5: WARNING - Socket.IO authentication failed")
+                _LOGGER.warning("Continuing anyway - some Homey versions might not require authentication")
+                self.sio_namespace = None
+                self.sio_token = None
+                self._sio_connecting = False  # Clear flag before disconnect
+                await self._disconnect_socketio()
+                return False
+            
+            if not self.sio_namespace or not self.sio_token:
+                _LOGGER.error("Step 2/5: FAILED - No namespace/token received from handshakeClient")
+                self._sio_connecting = False  # Clear flag before disconnect
+                await self._disconnect_socketio()
+                return False
+            
+            _LOGGER.debug("Step 2/5: SUCCESS - Socket.IO authentication successful")
+            _LOGGER.debug("  → Received namespace: %s", self.sio_namespace)
+            _LOGGER.debug("  → Received namespace token: %s...", self.sio_token[:20])
+            
+            # Step 3: Manually connect to /api namespace on the SAME Engine.IO connection
+            # The namespace token is session-bound, so we must use the same Engine.IO session
+            _LOGGER.debug("Step 3/5: Connecting to %s namespace on SAME Engine.IO connection", self.sio_namespace)
+            _LOGGER.debug("  → Namespace token is session-bound - must use same Engine.IO connection")
+            _LOGGER.debug("  → Trying both payload formats: {'token': ...} and {'auth': {'token': ...}}")
+            
+            # Initialize event and error storage for /api namespace connection
+            self._api_connected_evt = asyncio.Event()
+            self._api_connect_error = None
+            
+            # Helper function to connect /api namespace using proper Packet class
+            async def _connect_namespace_api(token: str) -> bool:
+                """Connect to /api namespace using python-socketio's Packet class."""
+                from socketio.packet import Packet
+                
+                self._api_connected_evt = asyncio.Event()
+                self._api_connect_error = None
+                
+                # Set up namespace-specific event handlers for /api namespace
+                def on_api_connect():
+                    _LOGGER.info("✅ Namespace %s connected", self.sio_namespace)
+                    if self._api_connected_evt:
+                        self._api_connected_evt.set()
+                
+                def on_api_connect_error(data):
+                    _LOGGER.error("❌ Namespace %s connect_error: %s", self.sio_namespace, data)
+                    self._api_connect_error = data
+                    if self._api_connected_evt:
+                        self._api_connected_evt.set()  # Unblock waiter even on error
+                
+                self.sio.on("connect", on_api_connect, namespace=self.sio_namespace)
+                self.sio.on("connect_error", on_api_connect_error, namespace=self.sio_namespace)
+                
+                # Helper to send packet with fallback for different python-socketio versions
+                async def _send_packet(pkt: Packet):
+                    """Send packet using available internal API with fallback."""
+                    if hasattr(self.sio, "_send_packet"):
+                        await self.sio._send_packet(pkt)
+                    elif hasattr(self.sio, "_send_packet_internal"):
+                        await self.sio._send_packet_internal(pkt)
+                    else:
+                        # Last resort: encode then send via engineio
+                        encoded = pkt.encode()
+                        await self.sio.eio.send(encoded)
+                
+                # Try both payload shapes, but send them as proper Packets
+                # Socket.IO packet types: 0=CONNECT, 1=DISCONNECT, 2=EVENT, 3=ACK, 4=CONNECT_ERROR
+                for idx, payload in enumerate(
+                    ({"token": token}, {"auth": {"token": token}}),
+                    start=1,
+                ):
+                    _LOGGER.debug("  → Attempt %d: CONNECT /api with payload keys: %s", idx, list(payload.keys()))
+                    
+                    # Create proper Socket.IO CONNECT packet (type 0 = CONNECT)
+                    pkt = Packet(packet_type=0, namespace=self.sio_namespace, data=payload)
+                    
+                    # Encode packet and log length for debugging
+                    encoded = pkt.encode()
+                    _LOGGER.debug("  → Encoded CONNECT packet length: %d bytes", len(encoded))
+                    
+                    # Send packet using proper encoding
+                    await _send_packet(pkt)
+                    
+                    try:
+                        await asyncio.wait_for(self._api_connected_evt.wait(), timeout=5)
+                    except asyncio.TimeoutError:
+                        pass
+                    
+                    # Check if namespace is actually connected (connect_error may not fire if server ignores)
+                    connected_namespaces = set(getattr(self.sio, "namespaces", {}).keys())
+                    if self.sio_namespace in connected_namespaces:
+                        _LOGGER.debug("  → Attempt %d SUCCESS - Namespace %s connected", idx, self.sio_namespace)
+                        return True
+                    
+                    # Reset for next attempt
+                    self._api_connected_evt.clear()
+                    if idx < 2:  # Log failure only if we have more attempts
+                        _LOGGER.debug("  → Attempt %d failed, trying next format...", idx)
+                
+                _LOGGER.error("FAILED to connect /api. connected namespaces=%s, last_error=%s",
+                              set(getattr(self.sio, "namespaces", {}).keys()), self._api_connect_error)
+                return False
+            
+            try:
+                # Connect /api namespace using proper Packet class
+                success = await _connect_namespace_api(self.sio_token)
+                
+                if not success:
+                    _LOGGER.error("Step 3/5: FAILED - Could not connect /api namespace on same Engine.IO session")
+                    connected_namespaces = set(getattr(self.sio, "namespaces", {}).keys())
+                    _LOGGER.error("  → Connected namespaces: %s", connected_namespaces)
+                    _LOGGER.error("  → Expected namespace: %s", self.sio_namespace)
+                    _LOGGER.error("  → Last connect_error: %s", self._api_connect_error)
+                    # Don't disconnect root - keep it alive for retry
+                    self._sio_connecting = False  # Clear flag even on failure
+                    return False
+                
+                _LOGGER.debug("Step 3/5: SUCCESS - Namespace %s connected", self.sio_namespace)
+                connected_namespaces = set(getattr(self.sio, "namespaces", {}).keys())
+                _LOGGER.debug("  → Connected namespaces: %s", connected_namespaces)
+                
+                # Register catch-all handler now that /api namespace is connected
+                # IMPORTANT: Preserve event_name - don't drop it!
+                def catch_all_event(event_name, *args):
+                    """Catch-all handler to see all Socket.IO events."""
+                    is_system_event = event_name in ("connect", "disconnect", "connect_error", "error")
+                    
+                    if not is_system_event:
+                        _LOGGER.debug("Socket.IO catch-all event received on /api: %s", event_name)
+                        # Route event by event_name - don't drop it!
+                        self._handle_socketio_event(event_name, *args)
+                
+                self.sio.on("*", catch_all_event, namespace=self.sio_namespace)
+                
+            except Exception as namespace_err:
+                _LOGGER.error("Step 3/5: FAILED - Error connecting to namespace %s: %s", self.sio_namespace, namespace_err, exc_info=True)
+                # Don't disconnect root - keep it alive for retry
+                self._sio_connecting = False  # Clear flag even on exception
+                return False
+            
+            # Step 4: Subscribe to device events on /api namespace (using same client)
+            _LOGGER.debug("Step 4/5: Subscribing to device events")
+            subscribe_success = await self._subscribe_device_events()
+            if not subscribe_success:
+                _LOGGER.error("Step 4/5: FAILED - Socket.IO device subscription failed")
+                _LOGGER.info("Socket.IO connection failed - will use polling for updates")
+                # Don't disconnect root - keep it alive for retry
+                return False
+            
+            _LOGGER.debug("Step 4/5: SUCCESS - Subscribed to device events")
+            
+            # Final status check
+            _LOGGER.debug("Step 5/5: Verifying Socket.IO connection status")
+            if self.sio and self.sio.connected:
+                # Check if /api namespace is connected
+                connected_namespaces = set(getattr(self.sio, "namespaces", {}).keys())
+                if self.sio_namespace in connected_namespaces:
+                    self._sio_connected = True
+                    _LOGGER.info("Socket.IO real-time updates enabled")
+                    _LOGGER.debug("  → Root namespace: /")
+                    _LOGGER.debug("  → API namespace: %s", self.sio_namespace)
+                    _LOGGER.debug("  → Connected namespaces: %s", connected_namespaces)
+                    _LOGGER.info("Real-time events will be received via Socket.IO")
+                    _LOGGER.info("=" * 60)
+                    # Stop any reconnection task since we're connected
+                    self._stop_sio_reconnect_task()
+                    self._sio_connecting = False  # Clear flag now that we're fully connected
+                    return True
+                else:
+                    _LOGGER.error("Step 5/5: FAILED - /api namespace not connected")
+                    _LOGGER.error("  → Connected namespaces: %s", connected_namespaces)
+                    _LOGGER.error("  → Expected namespace: %s", self.sio_namespace)
+                    # Don't disconnect root - keep it alive for retry
+                    self._sio_connecting = False  # Clear flag even on failure
+                    return False
+            else:
+                _LOGGER.error("Step 5/5: FAILED - Socket.IO connection lost during setup")
+                _LOGGER.info("=" * 60)
+                _LOGGER.info("Socket.IO Connection Test - FAILED")
+                _LOGGER.info("Will use polling (1 second interval) for updates")
+                _LOGGER.info("=" * 60)
+                self._sio_connecting = False  # Clear flag before disconnect
+                await self._disconnect_socketio()
+                return False
+            
+        except Exception as err:
+            _LOGGER.error("Socket.IO connection error: %s", err, exc_info=True)
+            _LOGGER.info("=" * 60)
+            _LOGGER.info("Socket.IO Connection Test - FAILED")
+            _LOGGER.info("Will use polling (1 second interval) for updates")
+            _LOGGER.info("=" * 60)
+            self._sio_connecting = False  # Clear flag before disconnect
+            await self._disconnect_socketio()
+            return False
+    
+    async def _authenticate_socketio(self) -> bool:
+        """Authenticate Socket.IO connection with handshakeClient event.
+        
+        Returns True if authentication successful, False otherwise.
+        """
+        if not self.sio or not self.sio.connected:
+            return False
+        
+        if not self.token:
+            _LOGGER.error("Cannot authenticate Socket.IO: missing token")
+            return False
+        
+        try:
+            # Emit handshakeClient event with token and homeyId
+            # According to Homey API docs, BOTH token and homeyId are REQUIRED
+            # Prepare handshake data
+            if not self.homey_id:
+                _LOGGER.warning("homeyId not available - attempting to retrieve from system info")
+                # Try to get homeyId from system info if not available
+                try:
+                    system_info = await self.get_system_info()
+                    if system_info:
+                        self.homey_id = (
+                            system_info.get("cloudId") or 
+                            system_info.get("id") or 
+                            system_info.get("homeyId")
+                        )
+                except Exception:
+                    pass
+            
+            # Try authentication with homeyId if available, otherwise try without it
+            # Some Homey versions/configurations might allow authentication without homeyId
+            if self.homey_id:
+                handshake_data = {"token": self.token, "homeyId": self.homey_id}
+                _LOGGER.debug("Authenticating Socket.IO with token and homeyId")
+            else:
+                _LOGGER.warning("homeyId not available - attempting Socket.IO authentication without it")
+                _LOGGER.warning("If this fails, add 'homey.system.readonly' permission to your API key")
+                handshake_data = {"token": self.token}
+            
+            # Use call() for request-response pattern (most reliable)
+            # CRITICAL: Call handshakeClient on the root namespace (/) explicitly
+            # Homey uses error-first callback pattern: (error, result)
+            # python-socketio's call() may return this as a tuple or just the result
+            try:
+                _LOGGER.debug("Sending handshakeClient with data: %s", {k: v if k != "token" else "***" for k, v in handshake_data.items()})
+                # Authenticate on root namespace (/) - this is where handshakeClient MUST be called
+                auth_response = await self.sio.call(
+                    "handshakeClient",
+                    handshake_data,
+                    timeout=10,
+                    namespace="/"  # Explicitly use root namespace "/" (not None)
+                )
+                # Log the EXACT response format for debugging (debug level only)
+                _LOGGER.debug("handshakeClient response: type=%s", type(auth_response).__name__)
+            except Exception as call_err:
+                _LOGGER.error("Socket.IO authentication failed: %s", call_err, exc_info=True)
+                if "homeyId" not in handshake_data:
+                    _LOGGER.error("  → Missing homeyId - add 'homey.system.readonly' permission to your API key")
+                return False
+            
+            # Parse handshake response
+            # Homey returns: (null, {token: '...', namespace: '/api', success: true})
+            # python-socketio's call() may return:
+            #   - Just the result dict: {token: '...', namespace: '/api', success: true}
+            #   - Or a tuple: (error, result) where error is None and result is the dict
+            self.sio_namespace = None
+            self.sio_token = None
+            
+            if auth_response:
+                # Handle (error, result) tuple format from error-first callback
+                if isinstance(auth_response, (list, tuple)) and len(auth_response) == 2:
+                    err, res = auth_response
+                    if err:
+                        _LOGGER.error("handshakeClient error: %s", err)
+                        return False
+                    # Extract from result
+                    auth_response = res  # Use result for further processing
+                
+                # Now process the actual result (could be string, dict, etc.)
+                if isinstance(auth_response, dict):
+                    # Most common format: {token: '...', namespace: '/api', success: true}
+                    self.sio_namespace = auth_response.get("namespace")
+                    self.sio_token = auth_response.get("token")
+                    success = auth_response.get("success", False)
+                    if not success:
+                        _LOGGER.error("handshakeClient returned success: false")
+                        return False
+                elif isinstance(auth_response, str):
+                    # Direct namespace string response
+                    self.sio_namespace = auth_response
+                else:
+                    _LOGGER.error("Unexpected handshake response format: %s (type: %s)", auth_response, type(auth_response))
+                    return False
+                
+                # Validate namespace was extracted
+                if not self.sio_namespace:
+                    _LOGGER.error("No namespace in handshake response: %s", auth_response)
+                    return False
+                
+                _LOGGER.info("Authentication successful - received namespace: %s", self.sio_namespace)
+                if self.sio_token:
+                    _LOGGER.debug("Received Socket.IO token from handshake")
+                return True
+            else:
+                # Empty response (null/None) - authentication failed
+                _LOGGER.error("handshakeClient returned empty response")
+                return False
+                
+        except Exception as err:
+            _LOGGER.error("Socket.IO authentication error: %s", err, exc_info=True)
+            return False
+    
+    async def _subscribe_device_events(self) -> bool:
+        """Subscribe to device update events via Socket.IO.
+        
+        According to Homey API docs, we need to subscribe to individual device URIs:
+        - For a specific device: homey:device:{deviceId}
+        - For manager-level events: homey:manager:devices
+        
+        After subscribing, events will arrive with the event name matching the URI.
+        
+        Returns True if subscription successful, False otherwise.
+        """
+        # Use the same client with namespace="/api" for subscriptions
+        if not self.sio or not self.sio.connected:
+            return False
+        
+        try:
+            # CRITICAL: Use the namespace from handshakeClient - subscriptions MUST be on that namespace
+            # If no namespace was returned, we can't subscribe (Homey requires namespace for broadcasts)
+            if not self.sio_namespace:
+                _LOGGER.error("  → Cannot subscribe: no namespace from handshakeClient")
+                _LOGGER.error("  → Homey requires namespace for broadcasts - subscriptions will fail")
+                return False
+            
+            subscription_namespace = self.sio_namespace
+            _LOGGER.debug("  → Using namespace for subscriptions: %s", subscription_namespace)
+
+            # Check if /api namespace is connected on the same client
+            # Use namespaces.keys() instead of connection_namespaces attribute
+            connected_namespaces = set(getattr(self.sio, "namespaces", {}).keys())
+            if subscription_namespace not in connected_namespaces:
+                _LOGGER.error(
+                    "  → Cannot subscribe: namespace %s is not connected (connected: %s)",
+                    subscription_namespace,
+                    connected_namespaces,
+                )
+                return False
+            
+            # According to Homey API docs:
+            # 1. Subscribe to manager-level events: homey:manager:devices (PLURAL - not singular!)
+            # 2. Subscribe to per-device events: homey:device:{deviceId}
+            # 3. The subscribe signature is: emit("subscribe", uri, callback) - URI as second parameter, not in object
+            # 4. Listen for events where the event name IS the URI: socket.on(uri, callback)
+            
+            # Subscribe to manager-level device events (PLURAL: "devices")
+            manager_uri = "homey:manager:devices"  # PLURAL - this is correct
+            _LOGGER.debug("  → Subscribing to manager-level device events: %s", manager_uri)
+            
+            # Set up per-URI handler for manager events (event name IS the URI)
+            # Homey emits: socket.on(uri, (event, data) => ...) - event name and data as separate args
+            def manager_handler(event_name, data):
+                """Handler for manager-level events - URI is homey:manager:devices."""
+                _LOGGER.debug("📥 HOMEY EVENT uri=%s event=%s data=%s", manager_uri, event_name, str(data)[:500])
+                # Manager events come as (event_name, data) where event_name is like "device.update", "capability.update"
+                if isinstance(data, dict):
+                    # Handle device events
+                    if event_name and event_name.startswith("device."):
+                        device_id = data.get("id") or data.get("deviceId")
+                        if device_id:
+                            _LOGGER.debug("  → Manager event: %s for device: %s", event_name, device_id)
+                            self._on_device_update(device_id, data)
+                        else:
+                            _LOGGER.debug("  → Manager event %s has no device ID", event_name)
+                    # Handle capability events
+                    elif event_name and event_name.startswith("capability."):
+                        device_id = data.get("deviceId") or data.get("device", {}).get("id")
+                        if device_id:
+                            _LOGGER.debug("  → Capability event: %s for device: %s", event_name, device_id)
+                            self._on_device_update(device_id, data)
+                        else:
+                            _LOGGER.debug("  → Capability event %s has no device ID", event_name)
+                    else:
+                        # Unknown event type - try to extract device ID anyway
+                        device_id = data.get("id") or data.get("deviceId")
+                        if device_id:
+                            _LOGGER.debug("  → Manager event (unknown type %s) for device: %s", event_name, device_id)
+                            self._on_device_update(device_id, data)
+                        else:
+                            _LOGGER.debug("  → Manager event (unknown type %s, no device ID)", event_name)
+                else:
+                    _LOGGER.debug("  → Manager event data is not a dict: %s", type(data))
+            
+            self.sio.on(manager_uri, manager_handler, namespace=subscription_namespace)
+            _LOGGER.debug("  → Registered event listener for manager URI: %s (namespace: %s)", manager_uri, subscription_namespace)
+            
+            try:
+                _LOGGER.debug("  → Emitting 'subscribe' with URI as plain string: %s", manager_uri)
+                # Homey expects: emit("subscribe", uri, namespace="/api") - URI as plain string, not object!
+                subscription_acknowledged = False
+                
+                def subscription_callback(*args):
+                    nonlocal subscription_acknowledged
+                    subscription_acknowledged = True
+                    _LOGGER.debug("  → Subscription callback received for %s: %s", manager_uri, args)
+                
+                # Use same client with namespace="/api" for subscriptions
+                # CRITICAL: URI must be plain string argument, not {uri: "..."}
+                await self.sio.emit("subscribe", manager_uri, callback=subscription_callback, namespace=subscription_namespace)
+                _LOGGER.debug("  → Subscribe emit sent for %s (namespace: %s)", manager_uri, subscription_namespace)
+                
+                # Wait a moment to see if callback fires
+                await asyncio.sleep(0.5)
+                if subscription_acknowledged:
+                    _LOGGER.debug("  → Subscription acknowledged via callback for %s", manager_uri)
+                else:
+                    _LOGGER.debug("  → No callback received for %s (may be normal)", manager_uri)
+            except Exception as err:
+                _LOGGER.error("  → Failed to subscribe to %s: %s", manager_uri, err, exc_info=True)
+            
+            # Now subscribe to individual devices
+            # According to Homey API docs:
+            # 1. Subscribe to each device URI: "homey:device:{deviceId}"
+            # 2. Listen to events where the event name IS the URI: socket.on(uri, callback)
+            # 3. Subscribe signature: emit("subscribe", uri, callback) - URI as second parameter
+            devices = await self.get_devices()
+            if devices:
+                _LOGGER.debug("  → Found %d devices - subscribing to each device URI", len(devices))
+                subscribed_count = 0
+                failed_count = 0
+                sample_device_id = None
+                for idx, device_id in enumerate(devices.keys()):
+                    try:
+                        device_uri = f"homey:device:{device_id}"
+                        # Set up per-URI handler for this device (event name IS the URI)
+                        # Homey emits: socket.on(uri, (event, data) => ...) - event name and data as separate args
+                        # Use closure to capture device_id and device_uri
+                        def make_device_handler(_device_id, _device_uri):
+                            def device_handler(event_name, data):
+                                """Handler for device-specific URI events."""
+                                _LOGGER.debug("📥 HOMEY EVENT uri=%s device_id=%s event=%s data=%s", _device_uri, _device_id, event_name, str(data)[:500])
+                                
+                                # Handle capability events - convert to device data format
+                                if event_name == "capability" and isinstance(data, dict):
+                                    capability_id = data.get("capabilityId")
+                                    value = data.get("value")
+                                    if capability_id and value is not None:
+                                        # Convert capability event to device data format
+                                        # Format: {"capabilitiesObj": {"onoff": {"value": false}}}
+                                        device_update = {
+                                            "capabilitiesObj": {
+                                                capability_id: {
+                                                    "value": value
+                                                }
+                                            }
+                                        }
+                                        _LOGGER.debug("  → Capability update: %s = %s", capability_id, value)
+                                        self._on_device_update(_device_id, device_update)
+                                    else:
+                                        # Fallback: pass data as-is
+                                        self._on_device_update(_device_id, data if isinstance(data, dict) else {})
+                                else:
+                                    # Other event types - process as device update
+                                    self._on_device_update(_device_id, data if isinstance(data, dict) else {})
+                            return device_handler
+                        
+                        self.sio.on(device_uri, make_device_handler(device_id, device_uri), namespace=subscription_namespace)
+                        if idx < 3:  # Log first 3 listener registrations for debugging
+                            _LOGGER.debug("  → Registered event listener for device URI: %s (namespace: %s)", device_uri, subscription_namespace)
+                        # Subscribe with correct signature: emit("subscribe", uri, namespace="/api")
+                        # CRITICAL: URI must be plain string argument, not {uri: "..."}
+                        if idx < 3:  # Log first 3 subscriptions for debugging
+                            _LOGGER.debug("  → Emitting 'subscribe' with URI as plain string: %s", device_uri)
+                        # Use same client with namespace="/api" for subscriptions
+                        await self.sio.emit("subscribe", device_uri, namespace=subscription_namespace)
+                        subscribed_count += 1
+                        if not sample_device_id:
+                            sample_device_id = device_id
+                    except Exception as err:
+                        failed_count += 1
+                        if failed_count <= 3:  # Log first 3 failures
+                            _LOGGER.error("  → Failed to subscribe to device %s: %s", device_id, err)
+                
+                if subscribed_count > 0:
+                    _LOGGER.debug("  → Subscribed to %d/%d devices successfully", subscribed_count, len(devices))
+                    if sample_device_id:
+                        _LOGGER.debug("  → Sample device URI subscribed: homey:device:%s", sample_device_id)
+                    if failed_count > 0:
+                        _LOGGER.warning("  → Failed to subscribe to %d devices", failed_count)
+                else:
+                    _LOGGER.error("  → Failed to subscribe to any individual devices")
+                    return False
+            else:
+                _LOGGER.debug("  → No devices available to subscribe to")
+                return False
+            
+            _LOGGER.debug("  → All subscriptions sent - Socket.IO ready to receive events")
+            _LOGGER.info("Socket.IO Subscription Summary:")
+            _LOGGER.info("  → Connected to: %s", self.host)
+            _LOGGER.info("  → Namespace: %s", subscription_namespace)
+            _LOGGER.info("  → Authenticated: Yes")
+            _LOGGER.info("  → Listening for events:")
+            _LOGGER.info("    - Manager URI: %s (receives device.create, device.update, device.delete, capability.*)", manager_uri)
+            _LOGGER.info("    - Individual device URIs: homey:device:{deviceId} (%d devices)", len(devices) if devices else 0)
+            _LOGGER.info("    - Catch-all handler: * (ALL events)")
+            _LOGGER.info("  → Test: Change a device in Homey app and watch logs for events")
+            _LOGGER.info("=" * 60)
+            
+            # If we got here, subscription was sent (even if no response)
+            # Events will come through the handlers we set up above
+            # The catch-all handler will also log any events we're not explicitly listening for
+            return True
+                
+        except Exception as err:
+            _LOGGER.warning("Socket.IO device subscription error: %s", err, exc_info=True)
+            return False
+    
+    def _on_sio_connect(self) -> None:
+        """Handle Socket.IO connection event."""
+        _LOGGER.info("Socket.IO connect event received - connection established")
+        # Don't set _sio_connected here - wait until authentication and subscription complete
+        # This is set in _connect_socketio after successful auth/subscription
+    
+    def _on_sio_disconnect(self) -> None:
+        """Handle Socket.IO disconnection event."""
+        # Don't start reconnect if we're in the middle of connection setup (Step 3)
+        if self._sio_connecting:
+            _LOGGER.debug("Socket.IO disconnected during connection setup - skipping reconnect")
+            return
+        
+        if self._sio_connected:  # Only log if we were previously connected
+            _LOGGER.warning("=" * 60)
+            _LOGGER.warning("Socket.IO DISCONNECTED - falling back to polling (5-10 second interval)")
+            _LOGGER.warning("Reconnection will be attempted automatically")
+            _LOGGER.warning("=" * 60)
+        self._sio_connected = False
+        # Start reconnection task if not already running
+        self._start_sio_reconnect_task()
+    
+    def _on_sio_connect_error(self, data: Any) -> None:
+        """Handle Socket.IO connection error."""
+        if self._sio_connected:  # Only log if we were previously connected
+            _LOGGER.error("=" * 60)
+            _LOGGER.error("Socket.IO CONNECTION ERROR: %s", data)
+            _LOGGER.error("Falling back to polling (5-10 second interval)")
+            _LOGGER.error("Reconnection will be attempted automatically")
+            _LOGGER.error("=" * 60)
+        else:
+            _LOGGER.error("Socket.IO connection error during initial setup: %s", data)
+        self._sio_connected = False
+        # Start reconnection task if not already running
+        self._start_sio_reconnect_task()
+    
+    def _on_sio_manager_event(self, event_name: str, data: dict[str, Any]) -> None:
+        """Handle manager-level events from Socket.IO.
+        
+        Manager events come as (event_name, data) where event_name is like:
+        - "device.create", "device.update", "device.delete"
+        - "capability.create", "capability.update", "capability.delete"
+        
+        Args:
+            event_name: Event type (e.g., "device.update", "capability.update")
+            data: Event data containing device/capability information
+        """
+        # Log first event to confirm Socket.IO is working
+        if not hasattr(self, "_sio_first_event_logged"):
+            _LOGGER.info("=" * 60)
+            _LOGGER.info("✓ Socket.IO WORKING - Received first manager event")
+            _LOGGER.info("Real-time updates confirmed - events arriving instantly")
+            _LOGGER.info("  → Event name: %s", event_name)
+            _LOGGER.info("  → Data keys: %s", list(data.keys())[:20] if isinstance(data, dict) else "N/A")
+            _LOGGER.info("=" * 60)
+            self._sio_first_event_logged = True
+        
+        _LOGGER.info("Socket.IO manager event received: %s", event_name)
+        
+        # Handle device events
+        if event_name.startswith("device."):
+            device_id = data.get("id") or data.get("deviceId")
+            if device_id:
+                _LOGGER.info("  → Device ID: %s", device_id)
+                # Process as device update
+                self._on_device_update(device_id, data)
+        # Handle capability events
+        elif event_name.startswith("capability."):
+            device_id = data.get("deviceId") or data.get("device", {}).get("id")
+            if device_id:
+                _LOGGER.info("  → Capability update for device: %s", device_id)
+                # Process as device update (capability changes affect device state)
+                self._on_device_update(device_id, data)
+    
+    def _on_sio_device_event(self, *args: Any) -> None:
+        """Handle device update event from Socket.IO.
+        
+        Args:
+            *args: Variable arguments - could be (data,) or (event_name, data)
+        """
+        # Log first event to confirm Socket.IO is working
+        if not hasattr(self, "_sio_first_event_logged"):
+            _LOGGER.info("=" * 60)
+            _LOGGER.info("✓ Socket.IO WORKING - Received first device event")
+            _LOGGER.info("Real-time updates confirmed - events arriving instantly")
+            _LOGGER.info("  → Args count: %d", len(args))
+            for idx, arg in enumerate(args):
+                _LOGGER.info("  → Arg[%d] type: %s", idx, type(arg).__name__)
+                if isinstance(arg, dict):
+                    _LOGGER.info("  → Arg[%d] keys: %s", idx, list(arg.keys())[:20])
+                _LOGGER.info("  → Arg[%d] value: %s", idx, str(arg)[:500])
+            _LOGGER.info("=" * 60)
+            _LOGGER.info("=" * 60)
+            self._sio_first_event_logged = True
+        
+        # Always log device events at INFO level so we can see them
+        _LOGGER.info("Socket.IO device event received: %d args, first arg type: %s", 
+                    len(args), type(args[0]).__name__ if args else "None")
+        if args and isinstance(args[0], dict):
+            device_id = args[0].get("id") or args[0].get("deviceId")
+            if device_id:
+                _LOGGER.info("  → Device ID: %s", device_id)
+        
+        # Handle different call signatures
+        data = None
+        if not args:
+            return
+            # If first arg is a string, it might be the event name
+            if len(args) == 1:
+                data = args[0]
+            elif len(args) >= 2:
+                # Event name, then data
+                data = args[1] if isinstance(args[1], dict) else args[0]
+            else:
+                data = args[0]
+        
+        if not data:
+            return
+        
+        # Data structure may vary - handle different formats
+        # Expected formats:
+        # 1. {"id": "device_id", ...device_data...} - direct device data
+        # 2. {"device": {"id": "device_id", ...}} - nested device format
+        # 3. {"deviceId": "device_id", ...} - alternative format
+        # 4. Array of devices: [{"id": "device_id", ...}, ...]
+        # 5. Event with URI and data: {"uri": "homey:manager:device:device_id", "data": {...}}
+        device_id = None
+        device_data = None
+        
+        if isinstance(data, dict):
+            # Check for URI-based format first
+            if "uri" in data and "data" in data:
+                uri = data.get("uri", "")
+                if "homey:manager:device" in uri:
+                    # Extract device ID from URI if present
+                    parts = uri.split(":")
+                    if len(parts) > 3:
+                        device_id = parts[-1]  # Last part is device ID
+                    device_data = data.get("data", {})
+                    if not device_id and "id" in device_data:
+                        device_id = device_data.get("id")
+            elif "id" in data:
+                # Direct device data format
+                device_id = data.get("id")
+                device_data = data
+            elif "device" in data:
+                # Nested device format
+                device = data.get("device", {})
+                device_id = device.get("id")
+                device_data = device
+            elif "deviceId" in data:
+                # Alternative format
+                device_id = data.get("deviceId")
+                device_data = data
+        elif isinstance(data, list) and len(data) > 0:
+            # Array of devices - process each one
+            for item in data:
+                if isinstance(item, dict) and "id" in item:
+                    self._on_device_update(item.get("id"), item)
+            return
+        
+        if device_id and device_data:
+            # Log Socket.IO event arrival for debugging
+            _LOGGER.debug("Socket.IO event received for device %s", device_id)
+            # Call existing handler
+            self._on_device_update(device_id, device_data)
+        else:
+            # Only log unexpected formats at debug level (not info)
+            _LOGGER.debug("Socket.IO device event unexpected format: %s", data)
+    
+    def _start_sio_reconnect_task(self) -> None:
+        """Start background task to periodically attempt Socket.IO reconnection."""
+        # Only start if not already running and we have a session
+        if (self._sio_reconnect_task is None or self._sio_reconnect_task.done()) and self.session:
+            # Get the event loop - if we're in Home Assistant, use hass.loop
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    self._sio_reconnect_task = asyncio.create_task(self._sio_reconnect_loop())
+            except Exception as err:
+                _LOGGER.warning("Could not start Socket.IO reconnection task: %s", err)
+    
+    def _stop_sio_reconnect_task(self) -> None:
+        """Stop the Socket.IO reconnection task."""
+        if self._sio_reconnect_task and not self._sio_reconnect_task.done():
+            self._sio_reconnect_task.cancel()
+        self._sio_reconnect_task = None
+    
+    async def _sio_reconnect_loop(self) -> None:
+        """Background loop to periodically attempt Socket.IO reconnection."""
+        import time
+        attempt_count = 0
+        while True:
+            try:
+                # Wait before attempting reconnection
+                await asyncio.sleep(self._sio_reconnect_interval)
+                
+                # Only attempt if we're not already connected
+                if not self._sio_connected and self.session:
+                    attempt_count += 1
+                    _LOGGER.info("Socket.IO reconnection attempt #%d...", attempt_count)
+                    try:
+                        success = await self._connect_socketio()
+                        if success:
+                            _LOGGER.info("=" * 60)
+                            _LOGGER.info("Socket.IO RECONNECTED - real-time updates restored")
+                            _LOGGER.info("Polling continues as backup (1 second interval)")
+                            _LOGGER.info("=" * 60)
+                            # Reset first event flag so we log when events resume
+                            if hasattr(self, "_sio_first_event_logged"):
+                                delattr(self, "_sio_first_event_logged")
+                            return  # Exit loop since we're connected
+                        else:
+                            _LOGGER.debug("Socket.IO reconnection attempt #%d failed - will retry in %d seconds", attempt_count, self._sio_reconnect_interval)
+                    except Exception as err:
+                        _LOGGER.debug("Socket.IO reconnection attempt #%d error: %s", attempt_count, err)
+                        # Continue loop to try again later
+                elif self._sio_connected:
+                    # Already connected - exit loop
+                    _LOGGER.debug("Socket.IO already connected - stopping reconnection loop")
+                    return
+                else:
+                    # Session not available - exit loop
+                    return
+            except asyncio.CancelledError:
+                # Task was cancelled - exit cleanly
+                return
+            except Exception as err:
+                _LOGGER.error("Error in Socket.IO reconnection loop: %s", err, exc_info=True)
+                # Wait a bit before retrying
+                await asyncio.sleep(10)
+    
+    async def _disconnect_socketio(self) -> None:
+        """Disconnect Socket.IO client."""
+        # Stop reconnection task
+        self._stop_sio_reconnect_task()
+        
+        # Disconnect the single client (handles both root and /api namespaces)
+        if self.sio:
+            try:
+                if self.sio.connected:
+                    await self.sio.disconnect()
+            except Exception as err:
+                _LOGGER.debug("Error disconnecting Socket.IO: %s", err)
+            finally:
+                self.sio = None
+        
+        self._sio_connected = False
+        self.sio_namespace = None
+        self.sio_token = None
 
     def add_device_listener(self, listener: Callable[[str, dict[str, Any]], None]) -> None:
         """Add a listener for device updates."""
@@ -976,9 +2007,10 @@ class HomeyAPI:
 
     async def disconnect(self) -> None:
         """Disconnect from Homey API."""
-        if self.sio:
-            await self.sio.disconnect()
-            self.sio = None
+        # Stop reconnection task
+        self._stop_sio_reconnect_task()
+        
+        await self._disconnect_socketio()
 
         if self.session:
             await self.session.close()
