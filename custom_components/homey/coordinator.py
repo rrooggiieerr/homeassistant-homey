@@ -62,6 +62,8 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self.hass = hass
         self.zones = zones or {}
         self._previous_device_ids: set[str] = set()
+        self._last_recovery_attempt: float = 0.0
+        self._recovery_cooldown: int = 300  # seconds
         
         # Conditional batching: only batch when multiple updates arrive rapidly
         # Single updates process immediately for instant UI response
@@ -146,6 +148,16 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             
             devices = await self.api.get_devices()
             
+            # If we suddenly get no devices after previously having data,
+            # try a one-time recovery (Homey reboot/network blip).
+            if not devices and self._previous_device_ids:
+                if self._should_attempt_recovery():
+                    _LOGGER.warning(
+                        "No devices returned from Homey API - attempting automatic reconnect"
+                    )
+                    await self._attempt_api_recovery()
+                    devices = await self.api.get_devices()
+            
             # Update device registry for name/room changes
             await self._update_device_registry(devices)
             
@@ -166,8 +178,34 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             
             return devices
         except Exception as err:
+            if self._should_attempt_recovery():
+                _LOGGER.warning(
+                    "Polling error from Homey API - attempting automatic reconnect: %s",
+                    err,
+                )
+                await self._attempt_api_recovery()
             _LOGGER.error("Polling failed - error communicating with Homey: %s", err)
             raise UpdateFailed(f"Error communicating with Homey: {err}") from err
+
+    def _should_attempt_recovery(self) -> bool:
+        """Check if enough time has passed to attempt API recovery."""
+        now = time.time()
+        if now - self._last_recovery_attempt < self._recovery_cooldown:
+            return False
+        self._last_recovery_attempt = now
+        return True
+
+    async def _attempt_api_recovery(self) -> None:
+        """Attempt to re-establish API connection after errors."""
+        try:
+            await self.api.disconnect()
+        except Exception as err:
+            _LOGGER.debug("Failed to disconnect Homey API cleanly: %s", err)
+        try:
+            await self.api.connect()
+            await self.api.authenticate()
+        except Exception as err:
+            _LOGGER.debug("Homey API recovery attempt failed: %s", err)
 
     async def _assign_areas_to_devices(self) -> None:
         """Assign areas to devices based on Homey zones during initial setup."""
