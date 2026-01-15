@@ -9,17 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.5-beta.5] - 2026-01-14
+## [1.1.5-dev.10] - 2026-01-15
 
 ### 🚀 Major Real-Time Updates Release
 
 **This is a significant update that transforms the integration from polling-based to real-time event-driven updates. Device state changes in Homey now appear in Home Assistant instantly (< 1 second) instead of waiting for the next poll cycle (previously 10 seconds). This provides a truly responsive smart home experience where actions taken in Homey (via app, physical switches, or automations) are immediately reflected in Home Assistant's UI.**
 
 **⚠️ IMPORTANT: API Key Requirement**
-- **This feature requires updating your API key with the `homey.system.readonly` permission enabled**
-- Go to **Homey Settings → API Keys** and **edit your API key**
+- **This feature requires a new API key with the `homey.system.readonly` permission enabled**
+- Go to **Homey Settings → API Keys** and **create a new API key**
 - Enable the **System → View System** permission (`homey.system.readonly`)
-- After updating the API key permissions, restart Home Assistant or reload the Homey integration
+- After creating the new API key, update your Home Assistant integration configuration with the new key and restart Home Assistant or reload the Homey integration
 - Without this permission, Socket.IO real-time updates will not work and the integration will fall back to polling
 - The integration will continue to work with polling if the permission is missing, but you won't get instant updates
 
@@ -29,6 +29,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Bidirectional**: Commands sent from Home Assistant to Homey also get instant feedback, so you see the result immediately
 - **Seamless**: If Socket.IO connection fails, the integration automatically falls back to polling (5-10 seconds) - you never lose updates
 - **Efficient**: When Socket.IO is active, polling reduces to 60 seconds (safety net), saving API calls while maintaining reliability
+
+### Added
+- **Options & Reauth flows**: Update Homey host/IP, API key, and fallback polling settings without reinstalling
+- **Reauthentication flow**: Prompts for a new API key when credentials are invalid
+- **Auto-recovery**: Integration reconnects automatically after Homey restarts or network drops
+
+### Fixed
+- **Cover position feature**: Use compatible position feature flags to avoid attribute errors on older HA versions
+- **Device selection defaults**: All devices are selected by default in the setup flow
+- **Transient outages**: Prevents device removals when the API temporarily returns no devices
+
+### Changed
+- **Socket.IO logging**: Reduced per-update log noise (kept only key status)
 
 ## [1.1.5-dev.8] - 2026-01-13
 
@@ -669,4 +682,4 @@ When making changes:
 
 ---
 
-**Last Updated**: 2026-01-14
+**Last Updated**: 2026-01-15

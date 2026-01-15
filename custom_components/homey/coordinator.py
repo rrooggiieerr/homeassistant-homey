@@ -9,6 +9,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import CONF_DEVICE_FILTER, DOMAIN
@@ -26,6 +27,7 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         api: HomeyAPI,
         zones: dict[str, dict[str, Any]] | None = None,
         update_interval: timedelta | None = None,
+        recovery_cooldown: int | None = None,
     ) -> None:
         """Initialize the coordinator."""
         if update_interval is None:
@@ -63,7 +65,10 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self.zones = zones or {}
         self._previous_device_ids: set[str] = set()
         self._last_recovery_attempt: float = 0.0
-        self._recovery_cooldown: int = 300  # seconds
+        self._recovery_cooldown: int = recovery_cooldown or 300  # seconds
+        self._fallback_poll_interval: int = (
+            update_interval.seconds if update_interval else 10
+        )
         
         # Conditional batching: only batch when multiple updates arrive rapidly
         # Single updates process immediately for instant UI response
@@ -99,13 +104,19 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if hasattr(self.api, '_sio_connected'):
                 if not self.api._sio_connected:
                     # Socket.IO disconnected - use fallback polling interval (5-10 seconds)
-                    # Use 10 seconds as fallback to reduce API load while still being responsive
-                    if self.update_interval != timedelta(seconds=10):
-                        _LOGGER.debug("Socket.IO disconnected - switching to fallback polling (10 second interval)")
-                        self.update_interval = timedelta(seconds=10)
+                    # Use configured fallback to reduce API load while still being responsive
+                    if self.update_interval != timedelta(seconds=self._fallback_poll_interval):
+                        _LOGGER.debug(
+                            "Socket.IO disconnected - switching to fallback polling (%d second interval)",
+                            self._fallback_poll_interval,
+                        )
+                        self.update_interval = timedelta(seconds=self._fallback_poll_interval)
                     # Log status check only once per session (not every poll)
                     if not hasattr(self, "_sio_status_logged"):
-                        _LOGGER.debug("Socket.IO status: DISCONNECTED - using fallback polling (10 second interval)")
+                        _LOGGER.debug(
+                            "Socket.IO status: DISCONNECTED - using fallback polling (%d second interval)",
+                            self._fallback_poll_interval,
+                        )
                         _LOGGER.debug("Reconnection attempts will continue in background")
                         self._sio_status_logged = True
                     # Trigger reconnection attempt (will happen in background)
@@ -157,6 +168,11 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     )
                     await self._attempt_api_recovery()
                     devices = await self.api.get_devices()
+                if not devices:
+                    _LOGGER.warning(
+                        "No devices returned from Homey API - keeping last known devices"
+                    )
+                    return self.data or {}
             
             # Update device registry for name/room changes
             await self._update_device_registry(devices)
@@ -178,12 +194,38 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             
             return devices
         except Exception as err:
+            if isinstance(err, ConfigEntryAuthFailed):
+                raise
             if self._should_attempt_recovery():
                 _LOGGER.warning(
                     "Polling error from Homey API - attempting automatic reconnect: %s",
                     err,
                 )
                 await self._attempt_api_recovery()
+                try:
+                    devices = await self.api.get_devices()
+                    if devices:
+                        await self._update_device_registry(devices)
+                        current_device_ids = set(devices.keys())
+                        deleted_device_ids = self._previous_device_ids - current_device_ids
+                        if deleted_device_ids:
+                            await self._remove_deleted_devices(deleted_device_ids)
+                        self._previous_device_ids = current_device_ids
+                        update_duration = time.time() - update_start
+                        if update_duration > 1.0:
+                            _LOGGER.debug(
+                                "Device update took %.2f seconds, fetched %d devices",
+                                update_duration,
+                                len(devices),
+                            )
+                        return devices
+                except ConfigEntryAuthFailed:
+                    raise
+                except Exception as recovery_err:
+                    _LOGGER.debug(
+                        "Polling recovery fetch failed: %s",
+                        recovery_err,
+                    )
             _LOGGER.error("Polling failed - error communicating with Homey: %s", err)
             raise UpdateFailed(f"Error communicating with Homey: {err}") from err
 

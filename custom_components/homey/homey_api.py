@@ -11,6 +11,8 @@ import aiohttp
 import socketio
 from urllib.parse import quote
 
+from homeassistant.exceptions import ConfigEntryAuthFailed
+
 from .const import (
     API_BASE_V1,
     API_BASE_MANAGER,
@@ -196,6 +198,8 @@ class HomeyAPI:
                             _LOGGER.info("Polling working - successfully retrieved %d devices using endpoint: %s", len(self.devices), endpoint)
                             self._polling_logged = True
                         return self.devices
+                    elif response.status == 401:
+                        raise ConfigEntryAuthFailed("Invalid API key")
                     elif response.status == 404:
                         _LOGGER.debug("Endpoint %s not found, trying next...", endpoint)
                         continue

@@ -4,7 +4,7 @@
 [![GitHub issues](https://img.shields.io/github/issues/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/issues)
 [![GitHub stars](https://img.shields.io/github/stars/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/stargazers)
 
-**Version**: 1.1.5-beta.5 | **Last Updated**: 2026-01-14 | [Changelog](CHANGELOG.md)
+**Version**: 1.1.5-dev.10 | **Last Updated**: 2026-01-15 | [Changelog](CHANGELOG.md)
 
 A Homey integration for Home Assistant that automatically discovers and connects all your Homey devices, making them available natively in Home Assistant.
 
@@ -35,6 +35,7 @@ This Homey integration brings your [Homey](https://homey.app) hub into Home Assi
 - ⚡ **Real-Time Updates**: Socket.IO-powered instant state synchronization (< 1 second latency) - device changes in Homey appear immediately in Home Assistant
 - 📡 **Smart Polling**: Automatic fallback to polling (5-10 seconds) if Socket.IO fails, with dynamic intervals (60s when Socket.IO active, 10s when inactive)
 - ⚙️ **Easy Setup**: Simple configuration flow through Home Assistant's UI
+- ⚙️ **Options & Reauth flows**: Update Homey host/IP, API key, and fallback polling settings without reinstalling
 - 🎯 **Smart Device Grouping**: All entities from the same device are automatically grouped under one device entry
 - 🔐 **Permission Management**: Comprehensive permission checking with graceful degradation - integration works even with limited permissions
 
@@ -283,6 +284,7 @@ After copying files:
 11. Restart Home Assistant
 12. Go to **Settings** → **Devices & Services** → **Add Integration**
 13. Search for **"Homey"** and follow the setup instructions
+   - You can update the host/IP, API key, and fallback polling later via **Settings → Devices & Services → Homey → Configure**
 
 **Option 2: HACS Default Repository (Future)**
 
@@ -293,6 +295,7 @@ Once this integration is added to the HACS default repository, you can simply:
 4. Click **Download**
 5. Restart Home Assistant
 6. Configure the integration
+   - You can update the host/IP, API key, and fallback polling later via **Settings → Devices & Services → Homey → Configure**
 
 #### Updating via HACS
 

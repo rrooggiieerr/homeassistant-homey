@@ -186,7 +186,7 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
                 elif state == "down":
                     return 0
                 elif state == "idle":
-                    return 50
+                    return None
                 else:
                     # Unknown enum value, return None
                     return None
