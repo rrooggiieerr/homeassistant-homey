@@ -5,7 +5,19 @@
 **This update includes major real-time improvements and requires a NEW API key.**
 
 1. Go to **Homey Settings → API Keys**
-2. **Create a new API key** with **System → View System** permission (`homey.system.readonly`)
+2. **Create a new API key** with these permissions:
+   
+   **Required Permissions:**
+   - **View devices** (`homey.device.readonly`) - Required to read device states and discover devices
+   - **Control devices** (`homey.device.control`) - Required to control devices (turn on/off, set brightness, etc.)
+   - **View System** (`homey.system.readonly`) - Required for Socket.IO real-time updates. Without this, the integration will use polling (5-10 second updates) instead of instant updates (< 1 second).
+   
+   **Recommended Permissions:**
+   - **View Zones** (`homey.zone.readonly`) - Recommended for room/area organization. Without this, devices won't be organized by Homey rooms.
+   - **View Flows** (`homey.flow.readonly`) - Recommended to list Flows (needed for Flow button entities and service calls using flow names)
+   - **Start Flows** (`homey.flow.start`) - Recommended to trigger, enable, and disable Flows
+   - **View Moods** (`homey.mood.readonly`) - Recommended to list Moods (needed for Mood entities)
+   - **Set Moods** (`homey.mood.set`) - Recommended to trigger Moods
 3. Update the integration in Home Assistant (**Settings → Devices & Services → Homey → Configure**)
 4. Restart Home Assistant or reload the integration
 
