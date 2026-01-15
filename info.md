@@ -1,14 +1,36 @@
 # Homey Integration for Home Assistant
 
-## ⚠️ Important: API Key Requirement for Real-Time Updates
+## ⚠️ Action Required Before Updating
 
-**This version includes Socket.IO real-time updates!** To enable instant state synchronization (< 1 second latency), you need to update your API key permissions:
+**This update includes major real-time improvements and requires a NEW API key.**
 
 1. Go to **Homey Settings → API Keys**
-2. **Edit your API key** and enable the **System → View System** permission (`homey.system.readonly`)
-3. After updating permissions, restart Home Assistant or reload the Homey integration
+2. **Create a new API key** with **System → View System** permission (`homey.system.readonly`)
+3. Update the integration in Home Assistant (**Settings → Devices & Services → Homey → Configure**)
+4. Restart Home Assistant or reload the integration
 
-**Note**: The integration will work without this permission, but will use polling (5-10 second updates) instead of instant updates. Socket.IO provides real-time synchronization for the best experience.
+Without this permission, real-time updates will not work and the integration will fall back to polling (5-10 seconds).
+
+---
+
+## What’s New in 1.1.6
+
+### 🚀 Major Real-Time Updates
+- **Socket.IO real-time updates** (< 1 second latency)
+- Automatic fallback to polling (5-10 seconds) if Socket.IO fails
+- Reduced log noise for Socket.IO updates
+
+### ✅ New Configuration Options
+- **Options flow** to change Homey host/IP, API key, and fallback polling interval
+- **Reauthentication flow** when API key becomes invalid
+- **Auto-recovery** after Homey restart or network outages
+
+### 🧰 Stability & Fixes
+- Cover position compatibility fixes for older Home Assistant versions
+- Device selection defaults to **all devices selected**
+- Prevents device removals when Homey temporarily returns no devices
+
+For the full list of changes, additions, and fixes, see the [CHANGELOG](CHANGELOG.md).
 
 ---
 
