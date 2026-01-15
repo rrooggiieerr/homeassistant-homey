@@ -197,15 +197,18 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     async def _attempt_api_recovery(self) -> None:
         """Attempt to re-establish API connection after errors."""
+        recovered = False
         try:
             await self.api.disconnect()
         except Exception as err:
             _LOGGER.debug("Failed to disconnect Homey API cleanly: %s", err)
         try:
             await self.api.connect()
-            await self.api.authenticate()
+            recovered = await self.api.authenticate()
         except Exception as err:
             _LOGGER.debug("Homey API recovery attempt failed: %s", err)
+        if recovered:
+            _LOGGER.info("Homey API recovery successful - devices should repopulate shortly")
 
     async def _assign_areas_to_devices(self) -> None:
         """Assign areas to devices based on Homey zones during initial setup."""
