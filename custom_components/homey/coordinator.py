@@ -99,19 +99,19 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     # Socket.IO disconnected - use fallback polling interval (5-10 seconds)
                     # Use 10 seconds as fallback to reduce API load while still being responsive
                     if self.update_interval != timedelta(seconds=10):
-                        _LOGGER.info("Socket.IO disconnected - switching to fallback polling (10 second interval)")
+                        _LOGGER.debug("Socket.IO disconnected - switching to fallback polling (10 second interval)")
                         self.update_interval = timedelta(seconds=10)
                     # Log status check only once per session (not every poll)
                     if not hasattr(self, "_sio_status_logged"):
-                        _LOGGER.info("Socket.IO status: DISCONNECTED - using fallback polling (10 second interval)")
-                        _LOGGER.info("Reconnection attempts will continue in background")
+                        _LOGGER.debug("Socket.IO status: DISCONNECTED - using fallback polling (10 second interval)")
+                        _LOGGER.debug("Reconnection attempts will continue in background")
                         self._sio_status_logged = True
                     # Trigger reconnection attempt (will happen in background)
                     self.api._start_sio_reconnect_task()
                 else:
                     # Socket.IO is connected - reduce polling to safety net interval (60 seconds)
                     if self.update_interval != timedelta(seconds=60):
-                        _LOGGER.info("Socket.IO connected - reducing polling to safety net (60 second interval)")
+                        _LOGGER.debug("Socket.IO connected - reducing polling to safety net (60 second interval)")
                         self.update_interval = timedelta(seconds=60)
                         # Reset status logged flag so we log again if it disconnects
                         if hasattr(self, "_sio_status_logged"):
@@ -130,9 +130,9 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                             # This is just to help diagnose if Homey isn't sending events
                             check_threshold = 6 if self.update_interval == timedelta(seconds=5) else 1  # 6 polls at 5s = 30s, or 1 poll at 60s = 60s
                             if self._sio_check_count >= check_threshold:
-                                _LOGGER.info("Socket.IO connected but no events received yet (this is normal - events arrive when devices change)")
-                                _LOGGER.info("To test: Change a device in Homey app and watch for events in logs")
-                                _LOGGER.info("Socket.IO connection remains active - polling continues as safety net")
+                                _LOGGER.debug("Socket.IO connected but no events received yet (this is normal - events arrive when devices change)")
+                                _LOGGER.debug("To test: Change a device in Homey app and watch for events in logs")
+                                _LOGGER.debug("Socket.IO connection remains active - polling continues as safety net")
                                 self._sio_no_events_logged = True
                     else:
                         # Events are arriving - reset counters
@@ -482,7 +482,7 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         
         # Log Socket.IO update timing
         update_duration = time.time() - update_start
-        _LOGGER.info(
+        _LOGGER.debug(
             "Socket.IO update processed for device(s) %s in %.3f seconds - UI should update immediately",
             ", ".join(device_ids[:3]) + ("..." if len(device_ids) > 3 else ""),
             update_duration
