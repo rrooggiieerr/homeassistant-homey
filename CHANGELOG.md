@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.6-dev.1] - 2026-01-16
+
+### Changed
+- **Dev release**: Version bump for development branch
+
 ## [1.1.5-dev.11] - 2026-01-16
 
 ### Fixed
