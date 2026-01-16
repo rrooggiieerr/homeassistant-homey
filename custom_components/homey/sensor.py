@@ -241,6 +241,17 @@ CAPABILITY_TO_SENSOR = {
         "state_class": SensorStateClass.TOTAL_INCREASING,  # Cumulative cost
         "unit": None,  # Will be set from capability data (e.g., SEK, ¤)
     },
+    # Heat pump / compressor counters
+    "compressor_hours": {
+        "device_class": None,
+        "state_class": SensorStateClass.TOTAL_INCREASING,
+        "unit": "h",
+    },
+    "compressor_starts": {
+        "device_class": None,
+        "state_class": SensorStateClass.TOTAL_INCREASING,
+        "unit": None,
+    },
 }
 
 

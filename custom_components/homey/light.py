@@ -182,7 +182,6 @@ class HomeyLight(CoordinatorEntity, LightEntity):
 
         capabilities = device.get("capabilitiesObj", {})
         # Determine supported color modes
-        # Note: HS and COLOR_TEMP cannot be combined - if both are available, prefer HS
         color_modes = set()
         has_dim = "dim" in capabilities
         # Check for hue and saturation - both are needed for full HS color support
@@ -191,6 +190,8 @@ class HomeyLight(CoordinatorEntity, LightEntity):
         has_saturation = "light_saturation" in capabilities
         has_hs = has_hue and has_saturation
         has_temp = "light_temperature" in capabilities
+        has_light_mode = "light_mode" in capabilities
+        self._has_light_mode = has_light_mode
         
         # Log all capabilities found for debugging
         _LOGGER.debug(
@@ -204,36 +205,28 @@ class HomeyLight(CoordinatorEntity, LightEntity):
         )
         
         # Determine color modes based on available capabilities
-        # Priority: HS > COLOR_TEMP > BRIGHTNESS > ONOFF
-        # Note: HS and COLOR_TEMP cannot be combined - if both are available, prefer HS
-        # IMPORTANT: If device has both dim and light_temperature, use COLOR_TEMP mode (not BRIGHTNESS)
-        # This ensures temperature control is available for White & Ambiance bulbs
-        
-        if has_hs:
-            # Full HS color support (hue + saturation)
-            # HS mode automatically includes brightness, so don't add BRIGHTNESS separately
-            color_modes.add(ColorMode.HS)
-            _LOGGER.debug("Device %s (%s) supports HS color mode", device_id, device.get("name", "Unknown"))
-        elif has_hue and not has_saturation:
-            # Device has hue but not saturation - still use HS mode
-            # Some devices legitimately expose hue without saturation (e.g., some RGB-only devices)
-            _LOGGER.debug(
-                "Device %s (%s) has light_hue but not light_saturation - using HS mode",
-                device_id,
-                device.get("name", "Unknown")
-            )
-            color_modes.add(ColorMode.HS)
-        elif has_temp:
-            # Color temperature support (White & Ambiance bulbs, CCT controllers)
-            # COLOR_TEMP mode automatically includes brightness, so don't add BRIGHTNESS separately
-            # This applies even if device also has dim capability (e.g., White & Ambiance bulbs)
+        # Expose both HS and COLOR_TEMP when available so HA can switch modes.
+        if has_temp:
             color_modes.add(ColorMode.COLOR_TEMP)
-            _LOGGER.debug("Device %s (%s) supports COLOR_TEMP mode (has_temp=%s, has_dim=%s)", 
-                         device_id, device.get("name", "Unknown"), has_temp, has_dim)
+        if has_hs or has_hue:
+            # Use HS if full HS support or hue-only devices (saturation may be implicit)
+            color_modes.add(ColorMode.HS)
+
+        if color_modes:
+            _LOGGER.debug(
+                "Device %s (%s) supports color modes: %s",
+                device_id,
+                device.get("name", "Unknown"),
+                color_modes,
+            )
         elif has_dim:
             # Only dimming available (dimmable lights without color or temperature)
             color_modes.add(ColorMode.BRIGHTNESS)
-            _LOGGER.debug("Device %s (%s) supports BRIGHTNESS mode only", device_id, device.get("name", "Unknown"))
+            _LOGGER.debug(
+                "Device %s (%s) supports BRIGHTNESS mode only",
+                device_id,
+                device.get("name", "Unknown"),
+            )
         else:
             # Just on/off - this can happen for known light devices where capabilities aren't fully exposed
             # We still create a light entity but with limited functionality
@@ -246,7 +239,14 @@ class HomeyLight(CoordinatorEntity, LightEntity):
             color_modes.add(ColorMode.ONOFF)
 
         self._attr_supported_color_modes = color_modes
-        self._attr_color_mode = next(iter(color_modes)) if color_modes else ColorMode.ONOFF
+        if ColorMode.HS in color_modes and ColorMode.COLOR_TEMP in color_modes:
+            light_mode_value = capabilities.get("light_mode", {}).get("value")
+            if light_mode_value == "temperature":
+                self._attr_color_mode = ColorMode.COLOR_TEMP
+            else:
+                self._attr_color_mode = ColorMode.HS
+        else:
+            self._attr_color_mode = next(iter(color_modes)) if color_modes else ColorMode.ONOFF
         
         # Log color modes for debugging (use INFO so it shows in logs)
         _LOGGER.info(
@@ -473,6 +473,16 @@ class HomeyLight(CoordinatorEntity, LightEntity):
         # If color (HS) is being set, remove color temp as they're mutually exclusive
         if "light_hue" in capabilities_to_set or "light_saturation" in capabilities_to_set:
             capabilities_to_set.pop("light_temperature", None)
+
+        # Set light_mode if supported and we're changing color/temperature
+        if self._has_light_mode:
+            device_data = self.coordinator.data.get(self._device_id, self._device)
+            light_mode_cap = device_data.get("capabilitiesObj", {}).get("light_mode", {})
+            if light_mode_cap.get("setable", True):
+                if "light_temperature" in capabilities_to_set:
+                    capabilities_to_set["light_mode"] = "temperature"
+                elif "light_hue" in capabilities_to_set or "light_saturation" in capabilities_to_set:
+                    capabilities_to_set["light_mode"] = "color"
 
         # Always turn on if not already on - this must happen first
         # Also ensure brightness is set if color is being set (some devices need brightness > 0 for color to show)
