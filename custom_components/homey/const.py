@@ -14,7 +14,7 @@ CONF_INVERT_LIGHT_TEMPERATURE = "invert_light_temperature"
 DEFAULT_NAME = "Homey"
 DEFAULT_POLL_INTERVAL = 10  # seconds (fallback when Socket.IO is down)
 DEFAULT_RECOVERY_COOLDOWN = 300  # seconds
-DEFAULT_INVERT_LIGHT_TEMPERATURE = False
+DEFAULT_INVERT_LIGHT_TEMPERATURE = True
 
 # GitHub issue URL for reporting new/unknown capabilities
 CAPABILITY_REPORT_ISSUE_URL = "https://github.com/ifMike/homeyHASS/issues/new"

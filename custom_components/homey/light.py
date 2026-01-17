@@ -174,7 +174,7 @@ class HomeyLight(CoordinatorEntity, LightEntity):
         device: dict[str, Any],
         api,
         zones: dict[str, dict[str, Any]] | None = None,
-        invert_temp: bool = False,
+        invert_temp: bool = True,
     ) -> None:
         """Initialize the light."""
         super().__init__(coordinator)

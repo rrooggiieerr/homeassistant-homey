@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Heat pump status entities**: Restored missing boolean entities (e.g., `compressor_active`, `circulation_pump`, `hot_water`)
 - **Cover stop error**: Fixed `UnboundLocalError` when stopping enum-based curtains
 - **Service setup error**: Fixed `vol` import scoping issue during integration setup
+- **Light temperature default**: Invert normalized `light_temperature` by default (warm/cold correction)
 
 ## [1.1.6-dev.1] - 2026-01-16
 
