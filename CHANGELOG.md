@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.6-dev.5-multi] - 2026-01-17
+
+### Fixed
+- **Mixed cover capabilities**: Use `windowcoverings_set` for numeric position and `windowcoverings_state` for enum actions
+
 ## [1.1.6-dev.4-multi] - 2026-01-17
 
 ### Added
