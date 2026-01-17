@@ -26,6 +26,7 @@ async def async_setup_entry(
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+    homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
     # Use coordinator data if available (more up-to-date), otherwise fetch fresh
@@ -68,7 +69,7 @@ async def async_setup_entry(
             cap in capabilities for cap in ["windowcoverings_state", "windowcoverings_set", "garagedoor_closed"]
         )
         if has_cover_capabilities or is_devicegroups_cover:
-            entities.append(HomeyCover(coordinator, device_id, device, api, zones))
+            entities.append(HomeyCover(coordinator, device_id, device, api, zones, homey_id))
             if is_devicegroups_group:
                 _LOGGER.info(
                     "Created cover entity for devicegroups group: %s (id: %s, has_cover_capabilities=%s)",
@@ -90,12 +91,14 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
         device: dict[str, Any],
         api,
         zones: dict[str, dict[str, Any]] | None = None,
+        homey_id: str | None = None,
     ) -> None:
         """Initialize the cover."""
         super().__init__(coordinator)
         self._device_id = device_id
         self._device = device
         self._api = api
+        self._homey_id = homey_id
         self._attr_name = device.get("name", "Unknown Cover")
         self._attr_unique_id = f"homey_{device_id}_cover"
 
@@ -155,7 +158,7 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
 
         self._attr_supported_features = supported_features
 
-        self._attr_device_info = get_device_info(device_id, device, zones)
+        self._attr_device_info = get_device_info(self._homey_id, device_id, device, zones)
 
     @property
     def current_cover_position(self) -> int | None:

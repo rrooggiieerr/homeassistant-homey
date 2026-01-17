@@ -60,6 +60,7 @@ async def async_setup_entry(
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+    homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
     # Use coordinator data if available (more up-to-date), otherwise fetch fresh
@@ -76,7 +77,7 @@ async def async_setup_entry(
         for capability_id in CAPABILITY_TO_DEVICE_CLASS:
             if capability_id in capabilities:
                 entities.append(
-                    HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones)
+                    HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones, homey_id)
                 )
 
         # Then, handle ALL boolean capabilities generically (including unknown ones)
@@ -115,7 +116,7 @@ async def async_setup_entry(
             
             # Create binary sensor for this boolean capability
             entities.append(
-                HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones)
+                HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones, homey_id)
             )
 
     async_add_entities(entities)
@@ -132,6 +133,7 @@ class HomeyBinarySensor(CoordinatorEntity, BinarySensorEntity):
         capability_id: str,
         api,
         zones: dict[str, dict[str, Any]] | None = None,
+        homey_id: str | None = None,
     ) -> None:
         """Initialize the binary sensor."""
         super().__init__(coordinator)
@@ -139,6 +141,7 @@ class HomeyBinarySensor(CoordinatorEntity, BinarySensorEntity):
         self._device = device
         self._capability_id = capability_id
         self._api = api
+        self._homey_id = homey_id
 
         # Handle sub-capabilities (e.g., alarm_motion.outside)
         base_capability = capability_id.split(".")[0] if "." in capability_id else capability_id
@@ -157,7 +160,7 @@ class HomeyBinarySensor(CoordinatorEntity, BinarySensorEntity):
         self._attr_unique_id = f"homey_{device_id}_{capability_id}"
         self._attr_device_class = CAPABILITY_TO_DEVICE_CLASS.get(base_capability)
 
-        self._attr_device_info = get_device_info(device_id, device, zones)
+        self._attr_device_info = get_device_info(self._homey_id, device_id, device, zones)
 
     @property
     def is_on(self) -> bool:

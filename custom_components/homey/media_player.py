@@ -30,6 +30,7 @@ async def async_setup_entry(
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+    homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
     # Use coordinator data if available (more up-to-date), otherwise fetch fresh
@@ -45,7 +46,7 @@ async def async_setup_entry(
             cap in capabilities
             for cap in ["volume_set", "speaker_playing", "speaker_next", "speaker_prev"]
         ):
-            entities.append(HomeyMediaPlayer(coordinator, device_id, device, api, zones))
+            entities.append(HomeyMediaPlayer(coordinator, device_id, device, api, zones, homey_id))
 
     async_add_entities(entities)
 
@@ -60,12 +61,14 @@ class HomeyMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
         device: dict[str, Any],
         api,
         zones: dict[str, dict[str, Any]] | None = None,
+        homey_id: str | None = None,
     ) -> None:
         """Initialize the media player."""
         super().__init__(coordinator)
         self._device_id = device_id
         self._device = device
         self._api = api
+        self._homey_id = homey_id
         self._attr_name = device.get("name", "Unknown Media Player")
         self._attr_unique_id = f"homey_{device_id}_media_player"
 
@@ -85,7 +88,7 @@ class HomeyMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
 
         self._attr_supported_features = supported_features
 
-        self._attr_device_info = get_device_info(device_id, device, zones)
+        self._attr_device_info = get_device_info(self._homey_id, device_id, device, zones)
 
     @property
     def state(self) -> MediaPlayerState:

@@ -24,6 +24,7 @@ from .const import (
     DEFAULT_RECOVERY_COOLDOWN,
 )
 from .coordinator import HomeyDataUpdateCoordinator
+from .device_info import extract_device_id
 from .homey_api import HomeyAPI
 
 _LOGGER = logging.getLogger(__name__)
@@ -112,8 +113,9 @@ async def async_remove_config_entry_device(
     # Find the device_id from the device entry identifiers
     device_id = None
     for identifier in device_entry.identifiers:
-        if identifier[0] == DOMAIN:
-            device_id = identifier[1]
+        extracted = extract_device_id(identifier)
+        if extracted:
+            device_id = extracted
             break
     
     if not device_id:
@@ -213,6 +215,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Fetch zones (rooms) for device organization
     zones = await api.get_zones()
+    homey_id = api.homey_id or entry.data.get("host")
     
     # Create coordinator (pass zones so it can update device registry)
     poll_interval = entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
@@ -223,6 +226,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         zones,
         update_interval=timedelta(seconds=poll_interval),
         recovery_cooldown=recovery_cooldown,
+        homey_id=homey_id,
     )
     await coordinator.async_config_entry_first_refresh()
 
@@ -230,6 +234,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "api": api,
         "coordinator": coordinator,
         "zones": coordinator.zones,  # Use zones from coordinator (will be updated periodically)
+        "homey_id": api.homey_id or entry.data.get("host"),
     }
 
     # Register service to trigger test capability report (once per hass)

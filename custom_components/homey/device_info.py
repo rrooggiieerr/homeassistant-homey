@@ -5,6 +5,32 @@ import logging
 from typing import Any
 
 from .const import DOMAIN
+def build_device_identifier(homey_id: str | None, device_id: str) -> tuple[str, str]:
+    """Build a stable device registry identifier scoped to a Homey hub."""
+    if homey_id:
+        return (DOMAIN, f"{homey_id}:{device_id}")
+    return (DOMAIN, device_id)
+
+
+def extract_device_id(identifier: tuple[str, str]) -> str | None:
+    """Extract device_id from a device registry identifier."""
+    if len(identifier) < 2 or identifier[0] != DOMAIN:
+        return None
+    value = identifier[1]
+    if ":" in value:
+        return value.split(":", 1)[1]
+    return value
+
+
+def split_device_identifier(identifier: tuple[str, str]) -> tuple[str | None, str | None]:
+    """Split a device registry identifier into (homey_id, device_id)."""
+    if len(identifier) < 2 or identifier[0] != DOMAIN:
+        return None, None
+    value = identifier[1]
+    if ":" in value:
+        homey_id, device_id = value.split(":", 1)
+        return homey_id, device_id
+    return None, value
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -154,6 +180,7 @@ def get_device_type(capabilities: dict[str, Any], driver_uri: str | None = None,
 
 
 def get_device_info(
+    homey_id: str | None,
     device_id: str,
     device: dict[str, Any],
     zones: dict[str, dict[str, Any]] | None = None,
@@ -189,7 +216,7 @@ def get_device_info(
     # Build device info - MUST be identical for all entities from same device
     # The identifiers tuple is the key that Home Assistant uses to group entities
     device_info: dict[str, Any] = {
-        "identifiers": {(DOMAIN, device_id)},  # This MUST be identical for all entities from same device
+        "identifiers": {build_device_identifier(homey_id, device_id)},  # Scoped by Homey hub
         "name": device.get("name") or "Unknown Device",  # Use consistent None handling
         "manufacturer": manufacturer,
         "model": model,

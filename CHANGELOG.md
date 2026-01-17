@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.6-dev.3] - 2026-01-17
+
+### Added
+- **Multi-Homey device scoping**: Device registry identifiers now include Homey ID to prevent collisions
+
+### Fixed
+- **Multi-Homey device removal**: Prevents devices from disappearing when multiple Homeys are configured
+- **Invert toggle persistence**: Light temperature inversion option now persists correctly in settings
+
 ## [1.1.6-dev.2] - 2026-01-17
 
 ### Added
