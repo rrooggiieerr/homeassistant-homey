@@ -5,9 +5,11 @@ import logging
 from typing import Any
 
 from .const import DOMAIN
-def build_device_identifier(homey_id: str | None, device_id: str) -> tuple[str, str]:
+def build_device_identifier(
+    homey_id: str | None, device_id: str, multi_homey: bool = False
+) -> tuple[str, str]:
     """Build a stable device registry identifier scoped to a Homey hub."""
-    if homey_id:
+    if multi_homey and homey_id:
         return (DOMAIN, f"{homey_id}:{device_id}")
     return (DOMAIN, device_id)
 
@@ -184,6 +186,7 @@ def get_device_info(
     device_id: str,
     device: dict[str, Any],
     zones: dict[str, dict[str, Any]] | None = None,
+    multi_homey: bool = False,
 ) -> dict[str, Any]:
     """Get device info with room and type information.
     
@@ -216,7 +219,7 @@ def get_device_info(
     # Build device info - MUST be identical for all entities from same device
     # The identifiers tuple is the key that Home Assistant uses to group entities
     device_info: dict[str, Any] = {
-        "identifiers": {build_device_identifier(homey_id, device_id)},  # Scoped by Homey hub
+        "identifiers": {build_device_identifier(homey_id, device_id, multi_homey)},  # Scoped by Homey hub
         "name": device.get("name") or "Unknown Device",  # Use consistent None handling
         "manufacturer": manufacturer,
         "model": model,

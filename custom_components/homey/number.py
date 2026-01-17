@@ -40,6 +40,7 @@ async def async_setup_entry(
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+    multi_homey = hass.data[DOMAIN][entry.entry_id].get("multi_homey", False)
     homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
@@ -59,7 +60,7 @@ async def async_setup_entry(
                 # Only add if settable (user can control it)
                 if cap_data.get("setable"):
                     entities.append(
-                        HomeyNumber(coordinator, device_id, device, capability_id, cap_data, api, zones, homey_id)
+                        HomeyNumber(coordinator, device_id, device, capability_id, cap_data, api, zones, homey_id, multi_homey)
                     )
         
         # Check for pattern-based number capabilities (sub-capabilities)
@@ -92,7 +93,7 @@ async def async_setup_entry(
             
             if is_number_pattern or is_numeric_settable:
                 entities.append(
-                    HomeyNumber(coordinator, device_id, device, capability_id, cap_data, api, zones, homey_id)
+                    HomeyNumber(coordinator, device_id, device, capability_id, cap_data, api, zones, homey_id, multi_homey)
                 )
 
     async_add_entities(entities)
@@ -111,6 +112,7 @@ class HomeyNumber(CoordinatorEntity, NumberEntity):
         api,
         zones: dict[str, dict[str, Any]] | None = None,
         homey_id: str | None = None,
+        multi_homey: bool = False,
     ) -> None:
         """Initialize the number entity."""
         super().__init__(coordinator)
@@ -120,6 +122,7 @@ class HomeyNumber(CoordinatorEntity, NumberEntity):
         self._capability_data = capability_data
         self._api = api
         self._homey_id = homey_id
+        self._multi_homey = multi_homey
         
         device_name = device.get("name", "Unknown Device")
         self._attr_name = f"{device_name} {capability_id.replace('_', ' ').title()}"
@@ -135,7 +138,9 @@ class HomeyNumber(CoordinatorEntity, NumberEntity):
         if unit:
             self._attr_native_unit_of_measurement = unit
         
-        self._attr_device_info = get_device_info(self._homey_id, device_id, device, zones)
+        self._attr_device_info = get_device_info(
+            self._homey_id, device_id, device, zones, self._multi_homey
+        )
 
     @property
     def native_value(self) -> float | None:

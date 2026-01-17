@@ -26,6 +26,7 @@ async def async_setup_entry(
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+    multi_homey = hass.data[DOMAIN][entry.entry_id].get("multi_homey", False)
     homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
@@ -39,7 +40,7 @@ async def async_setup_entry(
     for device_id, device in devices.items():
         capabilities = device.get("capabilitiesObj", {})
         if "locked" in capabilities:
-            entities.append(HomeyLock(coordinator, device_id, device, api, zones, homey_id))
+            entities.append(HomeyLock(coordinator, device_id, device, api, zones, homey_id, multi_homey))
 
     async_add_entities(entities)
 
@@ -55,6 +56,7 @@ class HomeyLock(CoordinatorEntity, LockEntity):
         api,
         zones: dict[str, dict[str, Any]] | None = None,
         homey_id: str | None = None,
+        multi_homey: bool = False,
     ) -> None:
         """Initialize the lock."""
         super().__init__(coordinator)
@@ -62,10 +64,13 @@ class HomeyLock(CoordinatorEntity, LockEntity):
         self._device = device
         self._api = api
         self._homey_id = homey_id
+        self._multi_homey = multi_homey
         self._attr_name = device.get("name", "Unknown Lock")
         self._attr_unique_id = f"homey_{device_id}_lock"
 
-        self._attr_device_info = get_device_info(self._homey_id, device_id, device, zones)
+        self._attr_device_info = get_device_info(
+            self._homey_id, device_id, device, zones, self._multi_homey
+        )
 
     @property
     def is_locked(self) -> bool | None:

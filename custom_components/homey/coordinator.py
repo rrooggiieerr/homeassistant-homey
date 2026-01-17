@@ -32,6 +32,7 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         update_interval: timedelta | None = None,
         recovery_cooldown: int | None = None,
         homey_id: str | None = None,
+        multi_homey: bool = False,
     ) -> None:
         """Initialize the coordinator."""
         if update_interval is None:
@@ -68,6 +69,7 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self.hass = hass
         self.zones = zones or {}
         self.homey_id = homey_id
+        self.multi_homey = multi_homey
         self._previous_device_ids: set[str] = set()
         self._last_recovery_attempt: float = 0.0
         self._recovery_cooldown: int = recovery_cooldown or 300  # seconds
@@ -380,7 +382,7 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         
         for device_id, device in self.data.items():
             device_entry = device_registry.async_get_device(
-                identifiers={build_device_identifier(self.homey_id, device_id)}, connections=set()
+                identifiers={build_device_identifier(self.homey_id, device_id, self.multi_homey)}, connections=set()
             )
             
             if not device_entry:
@@ -419,7 +421,7 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         
         for device_id, device in devices.items():
             device_entry = device_registry.async_get_device(
-                identifiers={build_device_identifier(self.homey_id, device_id)}, connections=set()
+                identifiers={build_device_identifier(self.homey_id, device_id, self.multi_homey)}, connections=set()
             )
             
             if not device_entry:
@@ -515,7 +517,7 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         
         for device_id in deleted_device_ids:
             device_entry = device_registry.async_get_device(
-                identifiers={build_device_identifier(self.homey_id, device_id)}, connections=set()
+                identifiers={build_device_identifier(self.homey_id, device_id, self.multi_homey)}, connections=set()
             )
             
             if device_entry:
@@ -566,7 +568,9 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             # Check if this device belongs to our integration and this config entry
             for identifier in device_entry.identifiers:
                 homey_id, extracted = split_device_identifier(identifier)
-                if extracted and (self.homey_id is None or homey_id == self.homey_id):
+                if extracted and (
+                    not self.multi_homey or self.homey_id is None or homey_id == self.homey_id
+                ):
                     device_id = extracted
                     
                     # Skip virtual devices - they should never be removed
@@ -592,7 +596,9 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 still_ours = False
                 for identifier in device_entry.identifiers:
                     homey_id, extracted = split_device_identifier(identifier)
-                    if extracted and extracted == device_id and (self.homey_id is None or homey_id == self.homey_id):
+                    if extracted and extracted == device_id and (
+                        not self.multi_homey or self.homey_id is None or homey_id == self.homey_id
+                    ):
                         still_ours = True
                         break
                 

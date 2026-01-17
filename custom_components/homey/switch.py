@@ -26,6 +26,7 @@ async def async_setup_entry(
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+    multi_homey = hass.data[DOMAIN][entry.entry_id].get("multi_homey", False)
     homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
@@ -111,7 +112,7 @@ async def async_setup_entry(
             # Create switch entity for each onoff capability
             # For multi-channel devices, this creates multiple switch entities
             for onoff_cap in onoff_capabilities:
-                entities.append(HomeySwitch(coordinator, device_id, device, api, zones, onoff_cap, homey_id))
+                entities.append(HomeySwitch(coordinator, device_id, device, api, zones, onoff_cap, homey_id, multi_homey))
                 _LOGGER.info(
                     "Created switch entity for device %s (%s) - capability: %s, driver: %s, class: %s",
                     device_id,
@@ -148,6 +149,7 @@ class HomeySwitch(CoordinatorEntity, SwitchEntity):
         zones: dict[str, dict[str, Any]] | None = None,
         onoff_capability: str = "onoff",
         homey_id: str | None = None,
+        multi_homey: bool = False,
     ) -> None:
         """Initialize the switch.
         
@@ -165,6 +167,7 @@ class HomeySwitch(CoordinatorEntity, SwitchEntity):
         self._api = api
         self._onoff_capability = onoff_capability
         self._homey_id = homey_id
+        self._multi_homey = multi_homey
         
         # Create entity name based on capability
         device_name = device.get("name", "Unknown Switch")
@@ -182,7 +185,9 @@ class HomeySwitch(CoordinatorEntity, SwitchEntity):
             # Use capability ID in unique_id (e.g., "homey_{device_id}_onoff.output1")
             self._attr_unique_id = f"homey_{device_id}_{onoff_capability}"
         
-        self._attr_device_info = get_device_info(self._homey_id, device_id, device, zones)
+        self._attr_device_info = get_device_info(
+            self._homey_id, device_id, device, zones, self._multi_homey
+        )
 
     @property
     def is_on(self) -> bool | None:

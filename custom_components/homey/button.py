@@ -54,6 +54,7 @@ async def async_setup_entry(
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+    multi_homey = hass.data[DOMAIN][entry.entry_id].get("multi_homey", False)
     homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
     
     # Clean up existing maintenance button entities from entity registry
@@ -148,7 +149,7 @@ async def async_setup_entry(
             flow_enabled = flow.get("enabled", False)
             if flow_enabled:
                 enabled_flows += 1
-                entities.append(HomeyFlowButton(coordinator, flow_id, flow, api, homey_id))
+                entities.append(HomeyFlowButton(coordinator, flow_id, flow, api, homey_id, multi_homey))
                 flow_buttons_count += 1
                 _LOGGER.debug("Added flow button: %s (enabled)", flow_name)
             else:
@@ -196,7 +197,7 @@ async def async_setup_entry(
                 
                 # Only add settable button capabilities
                 if capability_obj.get("setable"):
-                    entities.append(HomeyDeviceButton(coordinator, device_id, device, capability_id, api, zones, homey_id))
+                    entities.append(HomeyDeviceButton(coordinator, device_id, device, capability_id, api, zones, homey_id, multi_homey))
                     device_buttons_count += 1
 
     if entities:
@@ -221,6 +222,7 @@ class HomeyFlowButton(CoordinatorEntity, ButtonEntity):
         flow: dict[str, Any],
         api,
         homey_id: str | None = None,
+        multi_homey: bool = False,
     ) -> None:
         """Initialize the button."""
         super().__init__(coordinator)
@@ -228,11 +230,12 @@ class HomeyFlowButton(CoordinatorEntity, ButtonEntity):
         self._flow = flow
         self._api = api
         self._homey_id = homey_id
+        self._multi_homey = multi_homey
         self._attr_name = flow.get("name", "Unknown Flow")
         self._attr_unique_id = f"homey_{flow_id}_flow"
         self._attr_icon = "mdi:play-circle-outline"
 
-        flows_identifier = f"{homey_id}:flows" if homey_id else "flows"
+        flows_identifier = f"{homey_id}:flows" if (multi_homey and homey_id) else "flows"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, flows_identifier)},
             "name": "Homey Flows",
@@ -259,6 +262,7 @@ class HomeyDeviceButton(CoordinatorEntity, ButtonEntity):
         api,
         zones: dict[str, dict[str, Any]] | None = None,
         homey_id: str | None = None,
+        multi_homey: bool = False,
     ) -> None:
         """Initialize the device button."""
         super().__init__(coordinator)
@@ -267,6 +271,7 @@ class HomeyDeviceButton(CoordinatorEntity, ButtonEntity):
         self._capability_id = capability_id
         self._api = api
         self._homey_id = homey_id
+        self._multi_homey = multi_homey
         
         # Create button name
         device_name = device.get("name", "Unknown Device")
@@ -281,7 +286,9 @@ class HomeyDeviceButton(CoordinatorEntity, ButtonEntity):
         self._attr_unique_id = f"homey_{device_id}_{capability_id}"
         self._attr_icon = "mdi:gesture-tap-button"
         
-        self._attr_device_info = get_device_info(self._homey_id, device_id, device, zones)
+        self._attr_device_info = get_device_info(
+            self._homey_id, device_id, device, zones, self._multi_homey
+        )
 
     async def async_press(self) -> None:
         """Handle the button press - trigger the button capability."""

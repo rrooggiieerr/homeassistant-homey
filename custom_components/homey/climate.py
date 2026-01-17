@@ -31,6 +31,7 @@ async def async_setup_entry(
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+    multi_homey = hass.data[DOMAIN][entry.entry_id].get("multi_homey", False)
     homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
@@ -71,10 +72,10 @@ async def async_setup_entry(
         
         # Create climate entity if it has target_temperature OR is a devicegroups climate group
         if "target_temperature" in capabilities:
-            entities.append(HomeyClimate(coordinator, device_id, device, api, zones, homey_id))
+            entities.append(HomeyClimate(coordinator, device_id, device, api, zones, homey_id, multi_homey))
             _LOGGER.debug("Created climate entity for device %s (has target_temperature)", device_name)
         elif is_devicegroups_climate:
-            entities.append(HomeyClimate(coordinator, device_id, device, api, zones, homey_id))
+            entities.append(HomeyClimate(coordinator, device_id, device, api, zones, homey_id, multi_homey))
             _LOGGER.info(
                 "Created climate entity for devicegroups group: %s (id: %s, class: %s) - note: no target_temperature capability",
                 device_name,
@@ -96,6 +97,7 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
         api,
         zones: dict[str, dict[str, Any]] | None = None,
         homey_id: str | None = None,
+        multi_homey: bool = False,
     ) -> None:
         """Initialize the climate device."""
         super().__init__(coordinator)
@@ -103,6 +105,7 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
         self._device = device
         self._api = api
         self._homey_id = homey_id
+        self._multi_homey = multi_homey
         self._attr_name = device.get("name", "Unknown Climate")
         self._attr_unique_id = f"homey_{device_id}_climate"
         self._attr_temperature_unit = UnitOfTemperature.CELSIUS
@@ -279,7 +282,9 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
             # Default to 0.5°C steps
             self._attr_target_temperature_step = 0.5
 
-        self._attr_device_info = get_device_info(self._homey_id, device_id, device, zones)
+        self._attr_device_info = get_device_info(
+            self._homey_id, device_id, device, zones, self._multi_homey
+        )
 
     @property
     def current_temperature(self) -> float | None:

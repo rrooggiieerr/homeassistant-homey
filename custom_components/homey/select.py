@@ -35,6 +35,7 @@ async def async_setup_entry(
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+    multi_homey = hass.data[DOMAIN][entry.entry_id].get("multi_homey", False)
     homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
@@ -54,7 +55,7 @@ async def async_setup_entry(
                 # Check if capability has options/values (enum type)
                 if "values" in cap_data or "options" in cap_data or cap_data.get("type") == "enum":
                     entities.append(
-                        HomeySelect(coordinator, device_id, device, capability_id, cap_data, api, zones, homey_id)
+                        HomeySelect(coordinator, device_id, device, capability_id, cap_data, api, zones, homey_id, multi_homey)
                     )
         
         # Then, handle ALL enum-type capabilities generically (including unknown ones)
@@ -79,7 +80,7 @@ async def async_setup_entry(
                     continue
                 
                 entities.append(
-                    HomeySelect(coordinator, device_id, device, capability_id, cap_data, api, zones, homey_id)
+                    HomeySelect(coordinator, device_id, device, capability_id, cap_data, api, zones, homey_id, multi_homey)
                 )
 
     async_add_entities(entities)
@@ -98,6 +99,7 @@ class HomeySelect(CoordinatorEntity, SelectEntity):
         api,
         zones: dict[str, dict[str, Any]] | None = None,
         homey_id: str | None = None,
+        multi_homey: bool = False,
     ) -> None:
         """Initialize the select entity."""
         super().__init__(coordinator)
@@ -107,6 +109,7 @@ class HomeySelect(CoordinatorEntity, SelectEntity):
         self._capability_data = capability_data
         self._api = api
         self._homey_id = homey_id
+        self._multi_homey = multi_homey
         
         device_name = device.get("name", "Unknown Device")
         self._attr_name = f"{device_name} {capability_id.replace('_', ' ').title()}"
@@ -129,7 +132,9 @@ class HomeySelect(CoordinatorEntity, SelectEntity):
         else:
             self._attr_options = []
         
-        self._attr_device_info = get_device_info(self._homey_id, device_id, device, zones)
+        self._attr_device_info = get_device_info(
+            self._homey_id, device_id, device, zones, self._multi_homey
+        )
 
     @property
     def current_option(self) -> str | None:

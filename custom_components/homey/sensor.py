@@ -294,6 +294,7 @@ async def async_setup_entry(
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+    multi_homey = hass.data[DOMAIN][entry.entry_id].get("multi_homey", False)
     homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
@@ -330,7 +331,7 @@ async def async_setup_entry(
         for capability_id in CAPABILITY_TO_SENSOR:
             if capability_id in capabilities:
                 entities.append(
-                    HomeySensor(coordinator, device_id, device, capability_id, api, zones, homey_id)
+                    HomeySensor(coordinator, device_id, device, capability_id, api, zones, homey_id, multi_homey)
                 )
         
         # Then, handle ALL measure_* and meter_* capabilities generically (including unknown ones)
@@ -367,17 +368,17 @@ async def async_setup_entry(
                     # If base is known, use its config; otherwise create generic sensor
                     if base_capability in CAPABILITY_TO_SENSOR:
                         entities.append(
-                            HomeySensor(coordinator, device_id, device, capability_id, api, zones, homey_id)
+                            HomeySensor(coordinator, device_id, device, capability_id, api, zones, homey_id, multi_homey)
                         )
                     else:
                         # Unknown base capability - create generic sensor
                         entities.append(
-                            HomeySensor(coordinator, device_id, device, capability_id, api, zones, homey_id)
+                            HomeySensor(coordinator, device_id, device, capability_id, api, zones, homey_id, multi_homey)
                         )
                 else:
                     # Unknown top-level capability - create generic sensor
                     entities.append(
-                        HomeySensor(coordinator, device_id, device, capability_id, api, zones, homey_id)
+                        HomeySensor(coordinator, device_id, device, capability_id, api, zones, homey_id, multi_homey)
                     )
 
         # Finally, handle other getable, non-setable numeric/string capabilities
@@ -406,7 +407,7 @@ async def async_setup_entry(
             # Only create for numeric or string data
             if cap_type in ("number", "string"):
                 entities.append(
-                    HomeySensor(coordinator, device_id, device, capability_id, api, zones, homey_id)
+                    HomeySensor(coordinator, device_id, device, capability_id, api, zones, homey_id, multi_homey)
                 )
 
     async_add_entities(entities)
@@ -424,6 +425,7 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
         api,
         zones: dict[str, dict[str, Any]] | None = None,
         homey_id: str | None = None,
+        multi_homey: bool = False,
     ) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
@@ -432,6 +434,7 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
         self._capability_id = capability_id
         self._api = api
         self._homey_id = homey_id
+        self._multi_homey = multi_homey
         self._capability_type = device.get("capabilitiesObj", {}).get(capability_id, {}).get("type")
 
         # Handle sub-capabilities (e.g., measure_temperature.inside, meter_power.imported)
@@ -547,7 +550,9 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
             self._attr_device_class = None
             self._attr_native_unit_of_measurement = None
 
-        self._attr_device_info = get_device_info(self._homey_id, device_id, device, zones)
+        self._attr_device_info = get_device_info(
+            self._homey_id, device_id, device, zones, self._multi_homey
+        )
     
     def _normalize_price_unit(self, unit: str) -> str:
         """Normalize price sensor units to currency/kWh format for Home Assistant Energy dashboard.

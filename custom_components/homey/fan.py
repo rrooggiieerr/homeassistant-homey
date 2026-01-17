@@ -26,6 +26,7 @@ async def async_setup_entry(
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+    multi_homey = hass.data[DOMAIN][entry.entry_id].get("multi_homey", False)
     homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
@@ -68,7 +69,7 @@ async def async_setup_entry(
         # Note: Groups with class "fan" but no fan_speed will still create a fan entity
         # The entity will handle missing capabilities gracefully
         if "fan_speed" in capabilities or is_devicegroups_fan:
-            entities.append(HomeyFan(coordinator, device_id, device, api, zones, homey_id))
+            entities.append(HomeyFan(coordinator, device_id, device, api, zones, homey_id, multi_homey))
             if is_devicegroups_group:
                 _LOGGER.info(
                     "Created fan entity for devicegroups group: %s (id: %s, has_fan_speed=%s)",
@@ -91,6 +92,7 @@ class HomeyFan(CoordinatorEntity, FanEntity):
         api,
         zones: dict[str, dict[str, Any]] | None = None,
         homey_id: str | None = None,
+        multi_homey: bool = False,
     ) -> None:
         """Initialize the fan."""
         super().__init__(coordinator)
@@ -98,6 +100,7 @@ class HomeyFan(CoordinatorEntity, FanEntity):
         self._device = device
         self._api = api
         self._homey_id = homey_id
+        self._multi_homey = multi_homey
         self._attr_name = device.get("name", "Unknown Fan")
         self._attr_unique_id = f"homey_{device_id}_fan"
 
@@ -108,7 +111,9 @@ class HomeyFan(CoordinatorEntity, FanEntity):
 
         self._attr_supported_features = supported_features
 
-        self._attr_device_info = get_device_info(self._homey_id, device_id, device, zones)
+        self._attr_device_info = get_device_info(
+            self._homey_id, device_id, device, zones, self._multi_homey
+        )
 
     @property
     def is_on(self) -> bool:

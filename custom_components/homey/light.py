@@ -36,6 +36,7 @@ async def async_setup_entry(
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+    multi_homey = hass.data[DOMAIN][entry.entry_id].get("multi_homey", False)
     homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
     invert_temp = entry.options.get(
         CONF_INVERT_LIGHT_TEMPERATURE,
@@ -153,7 +154,7 @@ async def async_setup_entry(
                 has_temp,
                 device.get("driverUri", "unknown")
             )
-            entities.append(HomeyLight(coordinator, device_id, device, api, zones, invert_temp, homey_id))
+            entities.append(HomeyLight(coordinator, device_id, device, api, zones, invert_temp, homey_id, multi_homey))
         else:
             # Log why device was NOT detected as light (for debugging)
             if has_onoff:
@@ -178,6 +179,7 @@ class HomeyLight(CoordinatorEntity, LightEntity):
         zones: dict[str, dict[str, Any]] | None = None,
         invert_temp: bool = True,
         homey_id: str | None = None,
+        multi_homey: bool = False,
     ) -> None:
         """Initialize the light."""
         super().__init__(coordinator)
@@ -186,6 +188,7 @@ class HomeyLight(CoordinatorEntity, LightEntity):
         self._api = api
         self._invert_temp = invert_temp
         self._homey_id = homey_id
+        self._multi_homey = multi_homey
         self._attr_name = device.get("name", "Unknown Light")
         self._attr_unique_id = f"homey_{device_id}_light"
 
@@ -296,7 +299,9 @@ class HomeyLight(CoordinatorEntity, LightEntity):
                     self._attr_min_color_temp_kelvin, self._attr_max_color_temp_kelvin
                 )
 
-        self._attr_device_info = get_device_info(self._homey_id, device_id, device, zones)
+        self._attr_device_info = get_device_info(
+            self._homey_id, device_id, device, zones, self._multi_homey
+        )
 
     async def async_added_to_hass(self) -> None:
         """When entity is added to Home Assistant, ensure we have fresh data."""
