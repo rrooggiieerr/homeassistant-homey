@@ -44,6 +44,10 @@ CAPABILITY_TO_DEVICE_CLASS = {
     "water_box_attached": None,  # Generic binary sensor
     "mop_attached": None,  # Generic binary sensor
     "mop_dry_status": None,  # Generic binary sensor
+    # Heat pump / HVAC status flags
+    "compressor_active": BinarySensorDeviceClass.RUNNING,
+    "circulation_pump": BinarySensorDeviceClass.RUNNING,
+    "hot_water": BinarySensorDeviceClass.RUNNING,
 }
 
 
@@ -110,9 +114,9 @@ async def async_setup_entry(
                 continue
             
             # Create binary sensor for this boolean capability
-                entities.append(
-                    HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones)
-                )
+            entities.append(
+                HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones)
+            )
 
     async_add_entities(entities)
 

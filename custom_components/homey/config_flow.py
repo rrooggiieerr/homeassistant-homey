@@ -20,9 +20,11 @@ from .const import (
     CONF_DEVICE_FILTER,
     CONF_POLL_INTERVAL,
     CONF_RECOVERY_COOLDOWN,
+    CONF_INVERT_LIGHT_TEMPERATURE,
     CONF_TOKEN,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_RECOVERY_COOLDOWN,
+    DEFAULT_INVERT_LIGHT_TEMPERATURE,
     DOMAIN,
 )
 from .device_info import get_device_type
@@ -1093,11 +1095,13 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
         token_label = "API Key (leave blank to keep current)"
         poll_label = "Fallback polling interval (seconds)"
         recovery_label = "Recovery cooldown (seconds, between auto-recovery attempts)"
+        invert_temp_label = "Invert normalized light temperature (fixes warm/cold reversal)"
         if user_input is not None:
             host = user_input[host_label].strip().rstrip("/")
             token = user_input.get(token_label, "").strip()
             poll_interval = user_input.get(poll_label, DEFAULT_POLL_INTERVAL)
             recovery_cooldown = user_input.get(recovery_label, DEFAULT_RECOVERY_COOLDOWN)
+            invert_temp = user_input.get(invert_temp_label, DEFAULT_INVERT_LIGHT_TEMPERATURE)
 
             if not host.startswith(("http://", "https://")):
                 host = f"http://{host}"
@@ -1110,6 +1114,7 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
                 **self._entry.options,
                 CONF_POLL_INTERVAL: poll_interval,
                 CONF_RECOVERY_COOLDOWN: recovery_cooldown,
+                CONF_INVERT_LIGHT_TEMPERATURE: invert_temp,
             }
 
             self.hass.config_entries.async_update_entry(
@@ -1124,6 +1129,9 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
             poll_label: self._entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL),
             recovery_label: self._entry.options.get(
                 CONF_RECOVERY_COOLDOWN, DEFAULT_RECOVERY_COOLDOWN
+            ),
+            invert_temp_label: self._entry.options.get(
+                CONF_INVERT_LIGHT_TEMPERATURE, DEFAULT_INVERT_LIGHT_TEMPERATURE
             ),
         }
         options_schema = vol.Schema(
@@ -1142,6 +1150,9 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
                         min=60, max=3600, step=30, mode=selector.NumberSelectorMode.BOX
                     )
                 ),
+                vol.Required(
+                    invert_temp_label, default=defaults[invert_temp_label]
+                ): selector.BooleanSelector(),
             }
         )
         return self.async_show_form(

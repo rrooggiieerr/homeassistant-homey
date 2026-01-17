@@ -254,6 +254,36 @@ CAPABILITY_TO_SENSOR = {
     },
 }
 
+# Capabilities to exclude from generic sensor creation
+# (handled by other platforms or noisy/duplicate)
+GENERIC_SENSOR_EXCLUDE = {
+    "device_name",
+    "dim",
+    "onoff",
+    "light_hue",
+    "light_saturation",
+    "light_temperature",
+    "target_temperature",
+    "target_humidity",
+    "thermostat_mode",
+    "windowcoverings_state",
+    "windowcoverings_set",
+    "garagedoor_closed",
+    "locked",
+    "fan_speed",
+    "volume_set",
+    "speaker_playing",
+    "speaker_next",
+    "speaker_prev",
+    "speaker_shuffle",
+    "speaker_repeat",
+    "clean_time",
+    "clean_area",
+    "clean_last",
+    "position_x",
+    "position_y",
+}
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -349,6 +379,35 @@ async def async_setup_entry(
                         HomeySensor(coordinator, device_id, device, capability_id, api, zones)
                     )
 
+        # Finally, handle other getable, non-setable numeric/string capabilities
+        # This covers counters and informational fields like firmware_version or charge_time
+        for capability_id, cap_data in capabilities.items():
+            # Skip if already handled or explicitly excluded
+            if capability_id in CAPABILITY_TO_SENSOR or capability_id in GENERIC_SENSOR_EXCLUDE:
+                continue
+
+            cap_type = cap_data.get("type")
+            is_getable = cap_data.get("getable", False)
+            is_setable = cap_data.get("setable", False)
+
+            # Skip if not a readable capability
+            if not is_getable:
+                continue
+
+            # Skip settable values (they belong to number/select/light/climate/etc.)
+            if is_setable:
+                continue
+
+            # Skip enums (handled by select)
+            if cap_type == "enum":
+                continue
+
+            # Only create for numeric or string data
+            if cap_type in ("number", "string"):
+                entities.append(
+                    HomeySensor(coordinator, device_id, device, capability_id, api, zones)
+                )
+
     async_add_entities(entities)
 
 
@@ -370,6 +429,7 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
         self._device = device
         self._capability_id = capability_id
         self._api = api
+        self._capability_type = device.get("capabilitiesObj", {}).get(capability_id, {}).get("type")
 
         # Handle sub-capabilities (e.g., measure_temperature.inside, meter_power.imported)
         base_capability = capability_id.split(".")[0] if "." in capability_id else capability_id
@@ -477,6 +537,12 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
                 self._attr_native_unit_of_measurement = unit_from_capability
         else:
             self._attr_native_unit_of_measurement = sensor_config.get("unit")
+
+        # String sensors should not report a numeric state class or units
+        if self._capability_type == "string":
+            self._attr_state_class = None
+            self._attr_device_class = None
+            self._attr_native_unit_of_measurement = None
 
         self._attr_device_info = get_device_info(device_id, device, zones)
     
@@ -633,7 +699,7 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
         return None
 
     @property
-    def native_value(self) -> float | None:
+    def native_value(self) -> float | str | None:
         """Return the state of the sensor."""
         device_data = self.coordinator.data.get(self._device_id, self._device)
         capabilities = device_data.get("capabilitiesObj", {})
@@ -641,6 +707,9 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
         value = capability.get("value")
         if value is None:
             return None
+
+        if self._capability_type == "string":
+            return str(value)
         
         try:
             value_float = float(value)

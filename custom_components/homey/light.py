@@ -17,7 +17,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 import homeassistant.util.color as color_util
 
-from .const import DOMAIN
+from .const import CONF_INVERT_LIGHT_TEMPERATURE, DOMAIN, DEFAULT_INVERT_LIGHT_TEMPERATURE
 from .coordinator import HomeyDataUpdateCoordinator
 from .device_info import get_device_info
 
@@ -36,6 +36,9 @@ async def async_setup_entry(
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+    invert_temp = entry.options.get(
+        CONF_INVERT_LIGHT_TEMPERATURE, DEFAULT_INVERT_LIGHT_TEMPERATURE
+    )
 
     entities = []
     # Use coordinator data if available (more up-to-date), otherwise fetch fresh
@@ -148,7 +151,7 @@ async def async_setup_entry(
                 has_temp,
                 device.get("driverUri", "unknown")
             )
-            entities.append(HomeyLight(coordinator, device_id, device, api, zones))
+            entities.append(HomeyLight(coordinator, device_id, device, api, zones, invert_temp))
         else:
             # Log why device was NOT detected as light (for debugging)
             if has_onoff:
@@ -171,12 +174,14 @@ class HomeyLight(CoordinatorEntity, LightEntity):
         device: dict[str, Any],
         api,
         zones: dict[str, dict[str, Any]] | None = None,
+        invert_temp: bool = False,
     ) -> None:
         """Initialize the light."""
         super().__init__(coordinator)
         self._device_id = device_id
         self._device = device
         self._api = api
+        self._invert_temp = invert_temp
         self._attr_name = device.get("name", "Unknown Light")
         self._attr_unique_id = f"homey_{device_id}_light"
 
@@ -384,7 +389,10 @@ class HomeyLight(CoordinatorEntity, LightEntity):
             if temp_min == 0 and temp_max == 1:
                 # Normalized value - convert to Kelvin
                 # 0 = 2000K (warm), 1 = 6500K (cool)
-                kelvin = int(2000 + (temp * (6500 - 2000)))
+                if self._invert_temp:
+                    kelvin = int(6500 - (temp * (6500 - 2000)))
+                else:
+                    kelvin = int(2000 + (temp * (6500 - 2000)))
                 return kelvin
             else:
                 # Already in Kelvin
@@ -452,7 +460,10 @@ class HomeyLight(CoordinatorEntity, LightEntity):
                     # Clamp to valid range
                     kelvin = max(2000, min(6500, kelvin))
                     # Convert: 0 = 2000K, 1 = 6500K
-                    normalized = (kelvin - 2000) / (6500 - 2000)
+                    if self._invert_temp:
+                        normalized = (6500 - kelvin) / (6500 - 2000)
+                    else:
+                        normalized = (kelvin - 2000) / (6500 - 2000)
                     capabilities_to_set["light_temperature"] = normalized
                     _LOGGER.debug(
                         "Converting color temp %dK to normalized %.4f for device %s",

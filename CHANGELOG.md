@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.6-dev.2] - 2026-01-17
+
+### Added
+- **Capability reporting**: Notify when new capabilities appear with a prefilled GitHub issue link (auto-labeled `enhancement`)
+- **Light temperature option**: Toggle to invert normalized `light_temperature` for devices with warm/cold reversed
+- **Generic sensor coverage**: Create sensors for getable numeric/string capabilities beyond `measure_*` and `meter_*`
+
+### Fixed
+- **Heat pump status entities**: Restored missing boolean entities (e.g., `compressor_active`, `circulation_pump`, `hot_water`)
+- **Cover stop error**: Fixed `UnboundLocalError` when stopping enum-based curtains
+- **Service setup error**: Fixed `vol` import scoping issue during integration setup
+
 ## [1.1.6-dev.1] - 2026-01-16
 
 ### Changed

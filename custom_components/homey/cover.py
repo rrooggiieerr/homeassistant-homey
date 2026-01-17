@@ -282,6 +282,7 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
 
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop the cover."""
+        position = None
         if self._has_windowcoverings:
             if self._is_enum_based:
                 # Enum-based: use "idle" to stop
@@ -289,10 +290,13 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
             else:
                 # Numeric: get current position and set it again to stop
                 position = self.current_cover_position
-        if position is not None:
-            await self._api.set_capability_value(
+                if position is not None:
+                    await self._api.set_capability_value(
                         self._device_id, self._windowcoverings_cap, position / 100.0
-            )
+                    )
+        elif self._has_garagedoor:
+            # Some garage doors support stop by re-sending current state
+            _LOGGER.debug("Stop requested for garage door %s - no-op", self._device_id)
         # Immediately refresh this device's state for instant UI feedback
         await self.coordinator.async_refresh_device(self._device_id)
 

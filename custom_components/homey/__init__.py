@@ -11,11 +11,14 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import selector
+from homeassistant.helpers import config_validation as cv
+import voluptuous as vol
 
 from .const import (
     CONF_DEVICE_FILTER,
     CONF_POLL_INTERVAL,
     CONF_RECOVERY_COOLDOWN,
+    SERVICE_TEST_CAPABILITY_REPORT,
     DOMAIN,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_RECOVERY_COOLDOWN,
@@ -229,6 +232,42 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "zones": coordinator.zones,  # Use zones from coordinator (will be updated periodically)
     }
 
+    # Register service to trigger test capability report (once per hass)
+    if not hass.data[DOMAIN].get("services_registered"):
+        async def async_test_capability_report(call) -> None:
+            """Create a test notification for capability reporting."""
+            entry_id = call.data.get("entry_id")
+            entry_data = None
+
+            if entry_id:
+                entry_data = hass.data[DOMAIN].get(entry_id)
+            else:
+                # Use the first available entry
+                if hass.data[DOMAIN]:
+                    for data_key, data_value in hass.data[DOMAIN].items():
+                        if isinstance(data_value, dict) and "coordinator" in data_value:
+                            entry_data = data_value
+                            break
+
+            if not entry_data:
+                _LOGGER.error("No Homey entry available to run test capability report")
+                return
+
+            coordinator_instance = entry_data.get("coordinator")
+            if not coordinator_instance:
+                _LOGGER.error("Homey coordinator not available for test capability report")
+                return
+
+            coordinator_instance.async_create_test_capability_notification()
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_TEST_CAPABILITY_REPORT,
+            async_test_capability_report,
+            schema=vol.Schema({vol.Optional("entry_id"): cv.string}),
+        )
+        hass.data[DOMAIN]["services_registered"] = True
+
     # Forward the setup to the platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -320,7 +359,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # The EntitySelector will show a dropdown of available Homey flow button entities
     # Note: In button card UI, you may need to manually enter entity_id if dropdown doesn't appear
     # Format: button.<flow_name> (e.g., button.sova)
-    import voluptuous as vol
     
     hass.services.async_register(
         DOMAIN,
