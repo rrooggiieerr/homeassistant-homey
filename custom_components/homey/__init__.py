@@ -11,6 +11,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.components import persistent_notification
 from homeassistant.helpers import selector
 from homeassistant.helpers import config_validation as cv
 import voluptuous as vol
@@ -224,6 +225,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "If this host changes later, devices may need rescoping.",
             entry.data.get("host"),
         )
+        persistent_notification.async_create(
+            hass,
+            "Homey ID not available yet; using host for device scoping. "
+            "Once Homey ID is available, devices will be rescoped automatically.",
+            title="Homey: Pending device rescope",
+            notification_id=f"{DOMAIN}_pending_rescope",
+        )
 
     # Warn if another entry points to the same Homey (host or homey_id)
     for other_entry in hass.config_entries.async_entries(DOMAIN):
@@ -238,6 +246,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "This can cause device collisions.",
                 other_entry.entry_id,
                 homey_id,
+            )
+            persistent_notification.async_create(
+                hass,
+                "Another Homey entry appears to target the same hub. "
+                "This can cause device collisions. Consider removing the duplicate entry.",
+                title="Homey: Duplicate hub detected",
+                notification_id=f"{DOMAIN}_duplicate_hub",
             )
             break
 
@@ -607,6 +622,7 @@ async def _async_rescope_devices(
     device_registry = dr.async_get(hass)
     entity_registry = er.async_get(hass)
 
+    # First, reattach entities for this entry
     for entity_entry in entity_registry.entities.values():
         config_entry_id = getattr(entity_entry, "config_entry_id", None)
         if config_entry_id != entry.entry_id:
@@ -650,6 +666,42 @@ async def _async_rescope_devices(
             entity_entry.entity_id, device_id=target_device.id
         )
 
+    # Then, handle entities without config_entry_id but tied to our legacy devices
+    for device_entry in device_registry.devices.values():
+        legacy_device_id = None
+        already_scoped = False
+        for identifier in device_entry.identifiers:
+            if identifier[0] != DOMAIN:
+                continue
+            legacy_device_id = extract_device_id(identifier)
+            if ":" in identifier[1]:
+                already_scoped = True
+            break
+
+        if not legacy_device_id or already_scoped:
+            continue
+
+        # Reattach all entities from this legacy device to the scoped device
+        target_identifier = build_device_identifier(new_homey_id, legacy_device_id, True)
+        target_device = device_registry.async_get_device(
+            identifiers={target_identifier}, connections=set()
+        )
+        if not target_device:
+            target_device = device_registry.async_get_or_create(
+                config_entry_id=entry.entry_id,
+                identifiers={target_identifier},
+                manufacturer=device_entry.manufacturer,
+                model=device_entry.model,
+                name=device_entry.name,
+                suggested_area=device_entry.suggested_area,
+            )
+
+        for entity_entry in entity_registry.entities.values():
+            if entity_entry.device_id == device_entry.id:
+                entity_registry.async_update_entity(
+                    entity_entry.entity_id, device_id=target_device.id
+                )
+
     _LOGGER.info("Rescoping Homey devices complete")
 
 
@@ -657,6 +709,14 @@ async def _async_enable_multi_homey(hass: HomeAssistant) -> None:
     """Enable multi-homey mode and rescope devices."""
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN]["multi_homey_enabled"] = True
+
+    persistent_notification.async_create(
+        hass,
+        "Multiple Homey hubs detected. Migrating device registry identifiers "
+        "to prevent collisions. This may create new devices once.",
+        title="Homey: Multi-hub migration",
+        notification_id=f"{DOMAIN}_multi_homey_migration",
+    )
 
     for entry in hass.config_entries.async_entries(DOMAIN):
         if entry.domain != DOMAIN:
@@ -684,6 +744,13 @@ async def _async_enable_multi_homey(hass: HomeAssistant) -> None:
             if not has_entities:
                 device_registry.async_remove_device(device_entry.id)
             break
+
+    persistent_notification.async_create(
+        hass,
+        "Multi-hub migration completed. If you see duplicate devices, remove the old ones.",
+        title="Homey: Multi-hub migration complete",
+        notification_id=f"{DOMAIN}_multi_homey_migration_done",
+    )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

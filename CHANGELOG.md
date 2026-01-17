@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.6-dev.4-multi] - 2026-01-17
+
+### Added
+- **Multi-homey guardrails**: Multi-homey activates only when 2+ hubs exist
+- **Auto-rescope**: Rescopes devices when a second hub is added or Homey ID becomes available
+- **User notifications**: Pending rescope, migration start/finish, duplicate hub detection
+
+### Fixed
+- **Entity migration gaps**: Entities without config entry linkage are migrated by legacy identifiers
+
 ## [1.1.6-dev.3] - 2026-01-17
 
 ### Added
