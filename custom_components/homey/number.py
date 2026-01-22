@@ -18,7 +18,7 @@ _LOGGER = logging.getLogger(__name__)
 
 # Capabilities that should be exposed as number entities
 # These are numeric settings that users can control, not measurements
-NUMBER_CAPABILITIES = [
+NUMBER_CAPABILITIES: list[str] = [
     # Add capabilities here that need numeric input but aren't sensors
     # Example: "dim" could be here, but it's already handled by light platform
     # "some_setting": {"min": 0, "max": 100, "step": 1, "unit": "%"},

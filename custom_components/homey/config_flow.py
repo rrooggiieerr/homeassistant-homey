@@ -40,7 +40,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
     }
 )
 
-class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
     """Handle a config flow for Homey."""
 
     VERSION = 1
@@ -419,7 +419,7 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         # Store device_id to display_name mapping for parsing user input
         if not hasattr(self, "_device_id_to_display_name"):
-            self._device_id_to_display_name = {}
+            self._device_id_to_display_name: dict[str, str] = {}
         
         # Fetch devices and zones from Homey
         devices = {}
@@ -732,7 +732,7 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return False, None, "cannot_connect"
 
 
-class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
+class HomeyOptionsFlowHandlerLegacy(config_entries.OptionsFlow):
     """Handle options for the Homey integration."""
 
     def __init__(self, config_entry: ConfigEntry) -> None:
@@ -824,7 +824,7 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
         
         # Store device_id to display_name mapping for parsing user input
         if not hasattr(self, "_device_id_to_display_name"):
-            self._device_id_to_display_name = {}
+            self._device_id_to_display_name: dict[str, str] = {}
         
         # Fetch devices and zones from Homey
         devices = {}

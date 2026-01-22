@@ -412,7 +412,7 @@ class HomeyLight(CoordinatorEntity, LightEntity):
         """Turn the light on."""
         _LOGGER.debug("Turning on light %s (%s) with args: %s", self._attr_name, self._device_id, list(kwargs.keys()))
         
-        capabilities_to_set = {}
+        capabilities_to_set: dict[str, Any] = {}
 
         if ATTR_BRIGHTNESS in kwargs:
             brightness = kwargs[ATTR_BRIGHTNESS]

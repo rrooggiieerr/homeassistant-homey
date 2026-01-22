@@ -237,7 +237,7 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
             # Convert boolean to position: True (closed) = 0%, False (open) = 100%
             return 0 if is_closed else 100
         
-            return None
+        return None
 
     @property
     def is_closed(self) -> bool | None:

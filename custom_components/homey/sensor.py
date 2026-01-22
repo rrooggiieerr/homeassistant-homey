@@ -485,6 +485,7 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"homey_{device_id}_{capability_id}"
         self._attr_device_class = sensor_config.get("device_class")
         self._attr_state_class = sensor_config.get("state_class")
+        self._attr_native_unit_of_measurement: str | None = None
         
         # Get unit from capability data if available (important for price sensors, etc.)
         # This ensures sensors like Tibber price sensors get their units (e.g., SEK/kWh) from Homey

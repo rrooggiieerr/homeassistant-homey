@@ -65,6 +65,7 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             name="Homey",
             update_interval=update_interval,
         )
+        self.update_interval: timedelta | None = update_interval
         self.api = api
         self.hass = hass
         self.zones = zones or {}

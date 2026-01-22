@@ -34,7 +34,7 @@ async def async_setup_entry(
     multi_homey = hass.data[DOMAIN][entry.entry_id].get("multi_homey", False)
     homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
-    entities = []
+    entities: list[HomeyText] = []
     devices = coordinator.data if coordinator.data else await api.get_devices()
 
     # Filter devices if device_filter is configured

@@ -169,7 +169,9 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
             # Example: thermofloor_mode has ["Heat", "Energy Save Heat", "Off", "Cool"]
             for mode_value in mode_values:
                 mode_id = mode_value.get("id", mode_value.get("title", mode_value)) if isinstance(mode_value, dict) else str(mode_value)
-                mode_id_lower = mode_id.lower()
+                if mode_id is None:
+                    continue
+                mode_id_lower = str(mode_id).lower()
                 if "off" in mode_id_lower or mode_id_lower == "off":
                     if HVACMode.OFF not in hvac_modes:
                         hvac_modes.append(HVACMode.OFF)
@@ -228,7 +230,9 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
             mode_value = mode_cap_data.get("value")
             if mode_value:
                 mode_id = mode_value.get("id", mode_value.get("title", mode_value)) if isinstance(mode_value, dict) else str(mode_value)
-                mode_id_lower = mode_id.lower()
+                if mode_id is None:
+                    return HVACMode.HEAT_COOL
+                mode_id_lower = str(mode_id).lower()
                 if "off" in mode_id_lower or mode_id_lower == "off":
                     current_mode = HVACMode.OFF
                 elif "heat" in mode_id_lower and "energy" in mode_id_lower:
@@ -437,7 +441,10 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
             # Find matching mode value
             for mode_value_obj in mode_values:
                 mode_id = mode_value_obj.get("id", mode_value_obj.get("title", mode_value_obj)) if isinstance(mode_value_obj, dict) else str(mode_value_obj)
-                if mode_id in target_modes or mode_id.lower() in [m.lower() for m in target_modes]:
+                if mode_id is None:
+                    continue
+                mode_id_str = str(mode_id)
+                if mode_id_str in target_modes or mode_id_str.lower() in [m.lower() for m in target_modes]:
                     await self._api.set_capability_value(self._device_id, self._custom_mode_capability, mode_id)
                     await self.coordinator.async_refresh_device(self._device_id)
                     return
