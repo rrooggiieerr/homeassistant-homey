@@ -523,17 +523,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Migrate old device identifiers to be scoped by Homey ID."""
-    if entry.version >= 2:
+    """Migrate old device identifiers and entity unique IDs."""
+    if entry.version >= 3:
         return True
 
-    # Only migrate when multi-homey is enabled
-    if not hass.data.get(DOMAIN, {}).get("multi_homey_enabled"):
-        _LOGGER.debug("Skipping migration: multi-homey not enabled")
+    # Skip device ID migration when multi-homey isn't enabled, but still migrate entity unique_ids.
+    multi_homey_enabled = hass.data.get(DOMAIN, {}).get("multi_homey_enabled")
+    homey_id = entry.data.get("homey_id") or entry.data.get(CONF_HOST)
+    if not homey_id:
+        _LOGGER.debug("Skipping migration: missing homey_id")
         return True
 
     _LOGGER.info("Migrating Homey config entry from version %s", entry.version)
-    homey_id = entry.data.get("homey_id") or entry.data.get(CONF_HOST)
 
     device_registry = dr.async_get(hass)
     entity_registry = er.async_get(hass)
@@ -546,72 +547,108 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     # Reattach entities for this entry to a Homey-scoped device entry
-    for entity_entry in entity_registry.entities.values():
+    if multi_homey_enabled:
+        for entity_entry in entity_registry.entities.values():
+            config_entry_id = getattr(entity_entry, "config_entry_id", None)
+            if config_entry_id != entry.entry_id:
+                continue
+
+            if not entity_entry.device_id:
+                continue
+
+            device_entry = device_registry.async_get(entity_entry.device_id)
+            if not device_entry:
+                continue
+
+            # Find the legacy device_id for this integration
+            legacy_device_id = None
+            already_scoped = False
+            for identifier in device_entry.identifiers:
+                if identifier[0] != DOMAIN:
+                    continue
+                legacy_device_id = extract_device_id(identifier)
+                if legacy_device_id and ":" in identifier[1]:
+                    already_scoped = True
+                    break
+
+            if not legacy_device_id or already_scoped:
+                continue
+
+            target_identifier = build_device_identifier(homey_id, legacy_device_id, True)
+            target_device = device_registry.async_get_device(
+                identifiers={target_identifier}, connections=set()
+            )
+            if not target_device:
+                target_device = device_registry.async_get_or_create(
+                    config_entry_id=entry.entry_id,
+                    identifiers={target_identifier},
+                    manufacturer=device_entry.manufacturer,
+                    model=device_entry.model,
+                    name=device_entry.name,
+                    suggested_area=device_entry.suggested_area,
+                )
+
+            entity_registry.async_update_entity(
+                entity_entry.entity_id, device_id=target_device.id
+            )
+
+    # Clean up legacy device entries with unscoped identifiers
+    if multi_homey_enabled:
+        legacy_devices = []
+        for device_entry in device_registry.devices.values():
+            for identifier in device_entry.identifiers:
+                if identifier[0] != DOMAIN:
+                    continue
+                if ":" in identifier[1]:
+                    continue
+                legacy_devices.append(device_entry)
+                break
+
+        for device_entry in legacy_devices:
+            # Only remove if no entities are still attached
+            has_entities = any(
+                ent.device_id == device_entry.id
+                for ent in entity_registry.entities.values()
+            )
+            if not has_entities:
+                device_registry.async_remove_device(device_entry.id)
+
+    # Update entity unique IDs to include the Homey ID for this entry.
+    updated = 0
+    for entity_entry in list(entity_registry.entities.values()):
         config_entry_id = getattr(entity_entry, "config_entry_id", None)
         if config_entry_id != entry.entry_id:
             continue
-
-        if not entity_entry.device_id:
+        if not entity_entry.unique_id:
+            continue
+        if not entity_entry.unique_id.startswith("homey_"):
+            continue
+        if entity_entry.unique_id.startswith(f"homey_{homey_id}_"):
             continue
 
-        device_entry = device_registry.async_get(entity_entry.device_id)
-        if not device_entry:
-            continue
-
-        # Find the legacy device_id for this integration
-        legacy_device_id = None
-        already_scoped = False
-        for identifier in device_entry.identifiers:
-            if identifier[0] != DOMAIN:
-                continue
-            legacy_device_id = extract_device_id(identifier)
-            if legacy_device_id and ":" in identifier[1]:
-                already_scoped = True
-                break
-
-        if not legacy_device_id or already_scoped:
-            continue
-
-        target_identifier = build_device_identifier(homey_id, legacy_device_id, True)
-        target_device = device_registry.async_get_device(
-            identifiers={target_identifier}, connections=set()
-        )
-        if not target_device:
-            target_device = device_registry.async_get_or_create(
-                config_entry_id=entry.entry_id,
-                identifiers={target_identifier},
-                manufacturer=device_entry.manufacturer,
-                model=device_entry.model,
-                name=device_entry.name,
-                suggested_area=device_entry.suggested_area,
-            )
-
-        entity_registry.async_update_entity(
-            entity_entry.entity_id, device_id=target_device.id
-        )
-
-    # Clean up legacy device entries with unscoped identifiers
-    legacy_devices = []
-    for device_entry in device_registry.devices.values():
-        for identifier in device_entry.identifiers:
-            if identifier[0] != DOMAIN:
-                continue
-            if ":" in identifier[1]:
-                continue
-            legacy_devices.append(device_entry)
-            break
-
-    for device_entry in legacy_devices:
-        # Only remove if no entities are still attached
-        has_entities = any(
-            ent.device_id == device_entry.id
+        suffix = entity_entry.unique_id[len("homey_"):]
+        new_unique_id = f"homey_{homey_id}_{suffix}"
+        conflict = any(
+            ent.unique_id == new_unique_id and ent.config_entry_id == entry.entry_id
             for ent in entity_registry.entities.values()
         )
-        if not has_entities:
-            device_registry.async_remove_device(device_entry.id)
+        if conflict:
+            _LOGGER.warning(
+                "Skipping unique_id migration for %s due to conflict: %s",
+                entity_entry.entity_id,
+                new_unique_id,
+            )
+            continue
 
-    entry.version = 2
-    _LOGGER.info("Homey config entry migration complete")
+        entity_registry.async_update_entity(
+            entity_entry.entity_id, new_unique_id=new_unique_id
+        )
+        updated += 1
+
+    entry.version = 3
+    _LOGGER.info(
+        "Homey config entry migration complete (updated %d unique IDs)", updated
+    )
     return True
 
 
