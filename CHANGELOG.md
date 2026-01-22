@@ -9,16 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.6-beta.1] - 2026-01-22
+## [1.1.6-beta.2] - 2026-01-22
 
 ### Added
 - **Multi-homey support**: Multi-homey activates only when 2+ hubs exist, with auto-rescope when a new hub is added
+- **Read-only string sensors (default on)**: String capabilities can now be shown as read-only sensors without enabling editable text inputs
 - **Text entities (optional)**: Expose settable string capabilities as editable text inputs via integration options
 - **Switch coverage**: Create switches for other settable boolean capabilities beyond `onoff`
 - **Enum/string selects**: Select entities now support string/enum capabilities with proper titles
 - **Automation checks**: CI runs HASSfest, HACS, syntax, lint, type, test, and pre-commit checks
 
 ### Fixed
+- **Options persistence**: String exposure toggles now persist reliably across reloads
 - **Multi-homey collisions**: Entity unique IDs are scoped per Homey hub to prevent conflicts
 - **Entity migration gaps**: Entities without config entry linkage are migrated by legacy identifiers
 - **Binary sensor filtering**: Settable boolean capabilities no longer create duplicate binary sensors
@@ -27,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Notes
 - **Single Homey users**: No change needed — the integration works as before
 - **Multiple Homeys**: When a second hub is added, entities are re-scoped to avoid collisions and device visibility issues
+- **Missing status strings**: If you can’t see status/notification strings, check the string toggles in settings; you can disable them if you don’t want those entities
 
 ## [1.1.6-dev.7-multi] - 2026-01-22
 
