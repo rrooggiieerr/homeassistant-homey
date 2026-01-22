@@ -761,7 +761,13 @@ class HomeyOptionsFlowHandlerLegacy(config_entries.OptionsFlow):
             if not host.startswith(("http://", "https://")):
                 host = f"http://{host}"
 
-            new_data = {**self.config_entry.data, CONF_HOST: host, CONF_INVERT_LIGHT_TEMPERATURE: invert_temp}
+            new_data = {
+                **self.config_entry.data,
+                CONF_HOST: host,
+                CONF_INVERT_LIGHT_TEMPERATURE: invert_temp,
+                CONF_EXPOSE_SETTABLE_TEXT: expose_text,
+                CONF_EXPOSE_READONLY_STRINGS: expose_readonly_strings,
+            }
             if token:
                 new_data[CONF_TOKEN] = token
 
@@ -1132,23 +1138,46 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
         poll_label = "Fallback polling interval (seconds)"
         recovery_label = "Recovery cooldown (seconds, between auto-recovery attempts)"
         invert_temp_label = "Invert normalized light temperature (fixes warm/cold reversal)"
-        expose_text_label = "Expose string capabilities as editable text inputs (disables read-only)"
-        expose_readonly_strings_label = "Expose string capabilities as read-only sensors (default, off when editable is enabled)"
+        expose_text_label = "Expose string capabilities as editable text inputs (exclusive)"
+        expose_readonly_strings_label = "Expose string capabilities as read-only sensors (default)"
         if user_input is not None:
-            host = user_input[host_label].strip().rstrip("/")
-            token = user_input.get(token_label, "").strip()
-            poll_interval = user_input.get(poll_label, DEFAULT_POLL_INTERVAL)
-            recovery_cooldown = user_input.get(recovery_label, DEFAULT_RECOVERY_COOLDOWN)
-            invert_temp = user_input.get(invert_temp_label, False)
-            expose_text = user_input.get(expose_text_label, DEFAULT_EXPOSE_SETTABLE_TEXT)
+            def _get(label_key: str, config_key: str, default: Any) -> Any:
+                if label_key in user_input:
+                    return user_input.get(label_key, default)
+                return user_input.get(config_key, default)
+
+            host = _get(host_label, CONF_HOST, "").strip().rstrip("/")
+            token = str(_get(token_label, CONF_TOKEN, "")).strip()
+            poll_interval = _get(poll_label, CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
+            recovery_cooldown = _get(
+                recovery_label, CONF_RECOVERY_COOLDOWN, DEFAULT_RECOVERY_COOLDOWN
+            )
+            invert_temp = _get(invert_temp_label, CONF_INVERT_LIGHT_TEMPERATURE, False)
+            expose_text = _get(
+                expose_text_label, CONF_EXPOSE_SETTABLE_TEXT, DEFAULT_EXPOSE_SETTABLE_TEXT
+            )
             expose_readonly_strings = user_input.get(
                 expose_readonly_strings_label, DEFAULT_EXPOSE_READONLY_STRINGS
             )
+            expose_readonly_strings = _get(
+                expose_readonly_strings_label,
+                CONF_EXPOSE_READONLY_STRINGS,
+                expose_readonly_strings,
+            )
+            if expose_text:
+                # Prevent duplicates: editable text inputs take priority.
+                expose_readonly_strings = False
 
             if not host.startswith(("http://", "https://")):
                 host = f"http://{host}"
 
-            new_data = {**self._entry.data, CONF_HOST: host, CONF_INVERT_LIGHT_TEMPERATURE: invert_temp}
+            new_data = {
+                **self._entry.data,
+                CONF_HOST: host,
+                CONF_INVERT_LIGHT_TEMPERATURE: invert_temp,
+                CONF_EXPOSE_SETTABLE_TEXT: expose_text,
+                CONF_EXPOSE_READONLY_STRINGS: expose_readonly_strings,
+            }
             if token:
                 new_data[CONF_TOKEN] = token
 
@@ -1187,6 +1216,8 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
                 self._entry.data.get(CONF_EXPOSE_READONLY_STRINGS, DEFAULT_EXPOSE_READONLY_STRINGS),
             ),
         }
+        if defaults[expose_text_label]:
+            defaults[expose_readonly_strings_label] = False
         options_schema = vol.Schema(
             {
                 vol.Required(host_label, default=defaults[host_label]): str,
