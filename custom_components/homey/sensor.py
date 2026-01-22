@@ -23,7 +23,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import HomeyDataUpdateCoordinator
-from .device_info import get_device_info
+from .device_info import build_entity_unique_id, get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -482,7 +482,9 @@ class HomeySensor(CoordinatorEntity, SensorEntity):
                 display_name = capability_id.replace("measure_", "").replace("meter_", "").replace("_", " ").title()
             self._attr_name = f"{device.get('name', 'Unknown')} {display_name}"
         
-        self._attr_unique_id = f"homey_{device_id}_{capability_id}"
+        self._attr_unique_id = build_entity_unique_id(
+            homey_id, device_id, capability_id, multi_homey
+        )
         self._attr_device_class = sensor_config.get("device_class")
         self._attr_state_class = sensor_config.get("state_class")
         self._attr_native_unit_of_measurement: str | None = None

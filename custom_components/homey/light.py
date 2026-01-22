@@ -19,7 +19,7 @@ import homeassistant.util.color as color_util
 
 from .const import CONF_INVERT_LIGHT_TEMPERATURE, DOMAIN, DEFAULT_INVERT_LIGHT_TEMPERATURE
 from .coordinator import HomeyDataUpdateCoordinator
-from .device_info import get_device_info
+from .device_info import build_entity_unique_id, get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -190,7 +190,9 @@ class HomeyLight(CoordinatorEntity, LightEntity):
         self._homey_id = homey_id
         self._multi_homey = multi_homey
         self._attr_name = device.get("name", "Unknown Light")
-        self._attr_unique_id = f"homey_{device_id}_light"
+        self._attr_unique_id = build_entity_unique_id(
+            homey_id, device_id, "light", multi_homey
+        )
 
         capabilities = device.get("capabilitiesObj", {})
         # Determine supported color modes

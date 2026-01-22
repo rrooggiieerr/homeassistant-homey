@@ -12,7 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import HomeyDataUpdateCoordinator
-from .device_info import get_device_info
+from .device_info import build_entity_unique_id, get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -232,7 +232,9 @@ class HomeyFlowButton(CoordinatorEntity, ButtonEntity):
         self._homey_id = homey_id
         self._multi_homey = multi_homey
         self._attr_name = flow.get("name", "Unknown Flow")
-        self._attr_unique_id = f"homey_{flow_id}_flow"
+        self._attr_unique_id = build_entity_unique_id(
+            homey_id, flow_id, "flow", multi_homey
+        )
         self._attr_icon = "mdi:play-circle-outline"
 
         flows_identifier = f"{homey_id}:flows" if (multi_homey and homey_id) else "flows"
@@ -283,7 +285,9 @@ class HomeyDeviceButton(CoordinatorEntity, ButtonEntity):
             button_name = f"{device_name} Button {button_num}"
         
         self._attr_name = button_name
-        self._attr_unique_id = f"homey_{device_id}_{capability_id}"
+        self._attr_unique_id = build_entity_unique_id(
+            homey_id, device_id, capability_id, multi_homey
+        )
         self._attr_icon = "mdi:gesture-tap-button"
         
         self._attr_device_info = get_device_info(

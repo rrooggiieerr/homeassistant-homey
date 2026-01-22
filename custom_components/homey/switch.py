@@ -12,7 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CAPABILITY_TO_PLATFORM, DOMAIN
 from .coordinator import HomeyDataUpdateCoordinator
-from .device_info import get_device_info
+from .device_info import build_entity_unique_id, get_device_info
 from .button import is_maintenance_button
 
 _LOGGER = logging.getLogger(__name__)
@@ -229,10 +229,14 @@ class HomeySwitch(CoordinatorEntity, SwitchEntity):
         
         # Create unique ID based on capability
         if onoff_capability == "onoff":
-            self._attr_unique_id = f"homey_{device_id}_onoff"
+            self._attr_unique_id = build_entity_unique_id(
+                homey_id, device_id, "onoff", multi_homey
+            )
         else:
             # Use capability ID in unique_id (e.g., "homey_{device_id}_onoff.output1")
-            self._attr_unique_id = f"homey_{device_id}_{onoff_capability}"
+            self._attr_unique_id = build_entity_unique_id(
+                homey_id, device_id, onoff_capability, multi_homey
+            )
         
         self._attr_device_info = get_device_info(
             self._homey_id, device_id, device, zones, self._multi_homey

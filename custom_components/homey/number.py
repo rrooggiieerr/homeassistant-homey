@@ -12,7 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import HomeyDataUpdateCoordinator
-from .device_info import get_device_info
+from .device_info import build_entity_unique_id, get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -126,7 +126,9 @@ class HomeyNumber(CoordinatorEntity, NumberEntity):
         
         device_name = device.get("name", "Unknown Device")
         self._attr_name = f"{device_name} {capability_id.replace('_', ' ').title()}"
-        self._attr_unique_id = f"homey_{device_id}_{capability_id}"
+        self._attr_unique_id = build_entity_unique_id(
+            homey_id, device_id, capability_id, multi_homey
+        )
         
         # Get min/max/step from capability data
         self._attr_native_min_value = capability_data.get("min", 0)

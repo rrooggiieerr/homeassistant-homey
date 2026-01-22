@@ -17,7 +17,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import HomeyDataUpdateCoordinator
-from .device_info import get_device_info
+from .device_info import build_entity_unique_id, get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -113,7 +113,9 @@ class HomeyText(CoordinatorEntity, TextEntity):
         capability_title = capability_data.get("title")
         capability_label = capability_title or capability_id.replace("_", " ").title()
         self._attr_name = f"{device_name} {capability_label}"
-        self._attr_unique_id = f"homey_{device_id}_{capability_id}"
+        self._attr_unique_id = build_entity_unique_id(
+            homey_id, device_id, capability_id, multi_homey
+        )
 
         self._attr_device_info = get_device_info(
             self._homey_id, device_id, device, zones, self._multi_homey

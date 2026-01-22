@@ -12,7 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import HomeyDataUpdateCoordinator
-from .device_info import get_device_info
+from .device_info import build_entity_unique_id, get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -115,7 +115,9 @@ class HomeySelect(CoordinatorEntity, SelectEntity):
         capability_title = capability_data.get("title")
         capability_label = capability_title or capability_id.replace("_", " ").title()
         self._attr_name = f"{device_name} {capability_label}"
-        self._attr_unique_id = f"homey_{device_id}_{capability_id}"
+        self._attr_unique_id = build_entity_unique_id(
+            homey_id, device_id, capability_id, multi_homey
+        )
         
         # Get options from capability data
         # Enum capabilities have "values" array with objects like {"id": "VERY_CHEAP", "title": "VERY_CHEAP"}

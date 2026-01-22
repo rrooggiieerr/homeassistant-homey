@@ -16,7 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import HomeyDataUpdateCoordinator
-from .device_info import get_device_info
+from .device_info import build_entity_unique_id, get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -73,7 +73,9 @@ class HomeyMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
         self._homey_id = homey_id
         self._multi_homey = multi_homey
         self._attr_name = device.get("name", "Unknown Media Player")
-        self._attr_unique_id = f"homey_{device_id}_media_player"
+        self._attr_unique_id = build_entity_unique_id(
+            homey_id, device_id, "media_player", multi_homey
+        )
 
         capabilities = device.get("capabilitiesObj", {})
         supported_features = 0

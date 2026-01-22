@@ -14,6 +14,18 @@ def build_device_identifier(
     return (DOMAIN, device_id)
 
 
+def build_entity_unique_id(
+    homey_id: str | None,
+    primary_id: str,
+    suffix: str,
+    multi_homey: bool = False,
+) -> str:
+    """Build a unique entity ID scoped to a Homey hub."""
+    if multi_homey and homey_id:
+        return f"homey_{homey_id}_{primary_id}_{suffix}"
+    return f"homey_{primary_id}_{suffix}"
+
+
 def extract_device_id(identifier: tuple[str, str]) -> str | None:
     """Extract device_id from a device registry identifier."""
     if len(identifier) < 2 or identifier[0] != DOMAIN:

@@ -12,7 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import HomeyDataUpdateCoordinator
-from .device_info import get_device_info
+from .device_info import build_entity_unique_id, get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -66,7 +66,9 @@ class HomeyLock(CoordinatorEntity, LockEntity):
         self._homey_id = homey_id
         self._multi_homey = multi_homey
         self._attr_name = device.get("name", "Unknown Lock")
-        self._attr_unique_id = f"homey_{device_id}_lock"
+        self._attr_unique_id = build_entity_unique_id(
+            homey_id, device_id, "lock", multi_homey
+        )
 
         self._attr_device_info = get_device_info(
             self._homey_id, device_id, device, zones, self._multi_homey
