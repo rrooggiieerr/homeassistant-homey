@@ -20,9 +20,13 @@ from .const import (
     CONF_DEVICE_FILTER,
     CONF_POLL_INTERVAL,
     CONF_RECOVERY_COOLDOWN,
+    CONF_INVERT_LIGHT_TEMPERATURE,
+    CONF_EXPOSE_SETTABLE_TEXT,
     CONF_TOKEN,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_RECOVERY_COOLDOWN,
+    DEFAULT_INVERT_LIGHT_TEMPERATURE,
+    DEFAULT_EXPOSE_SETTABLE_TEXT,
     DOMAIN,
 )
 from .device_info import get_device_type
@@ -36,7 +40,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
     }
 )
 
-class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
     """Handle a config flow for Homey."""
 
     VERSION = 1
@@ -415,7 +419,7 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         # Store device_id to display_name mapping for parsing user input
         if not hasattr(self, "_device_id_to_display_name"):
-            self._device_id_to_display_name = {}
+            self._device_id_to_display_name: dict[str, str] = {}
         
         # Fetch devices and zones from Homey
         devices = {}
@@ -728,7 +732,7 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return False, None, "cannot_connect"
 
 
-class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
+class HomeyOptionsFlowHandlerLegacy(config_entries.OptionsFlow):
     """Handle options for the Homey integration."""
 
     def __init__(self, config_entry: ConfigEntry) -> None:
@@ -746,11 +750,13 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
             recovery_cooldown = user_input.get(
                 CONF_RECOVERY_COOLDOWN, DEFAULT_RECOVERY_COOLDOWN
             )
+            invert_temp = user_input.get(CONF_INVERT_LIGHT_TEMPERATURE, False)
+            expose_text = user_input.get(CONF_EXPOSE_SETTABLE_TEXT, DEFAULT_EXPOSE_SETTABLE_TEXT)
 
             if not host.startswith(("http://", "https://")):
                 host = f"http://{host}"
 
-            new_data = {**self.config_entry.data, CONF_HOST: host}
+            new_data = {**self.config_entry.data, CONF_HOST: host, CONF_INVERT_LIGHT_TEMPERATURE: invert_temp}
             if token:
                 new_data[CONF_TOKEN] = token
 
@@ -758,6 +764,8 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
                 **self.config_entry.options,
                 CONF_POLL_INTERVAL: poll_interval,
                 CONF_RECOVERY_COOLDOWN: recovery_cooldown,
+                CONF_INVERT_LIGHT_TEMPERATURE: invert_temp,
+                CONF_EXPOSE_SETTABLE_TEXT: expose_text,
             }
 
             self.hass.config_entries.async_update_entry(
@@ -775,6 +783,14 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
             CONF_RECOVERY_COOLDOWN: self.config_entry.options.get(
                 CONF_RECOVERY_COOLDOWN, DEFAULT_RECOVERY_COOLDOWN
             ),
+            CONF_INVERT_LIGHT_TEMPERATURE: self.config_entry.options.get(
+                CONF_INVERT_LIGHT_TEMPERATURE,
+                self.config_entry.data.get(CONF_INVERT_LIGHT_TEMPERATURE, DEFAULT_INVERT_LIGHT_TEMPERATURE),
+            ),
+            CONF_EXPOSE_SETTABLE_TEXT: self.config_entry.options.get(
+                CONF_EXPOSE_SETTABLE_TEXT,
+                self.config_entry.data.get(CONF_EXPOSE_SETTABLE_TEXT, DEFAULT_EXPOSE_SETTABLE_TEXT),
+            ),
         }
         options_schema = vol.Schema(
             {
@@ -786,6 +802,14 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_RECOVERY_COOLDOWN, default=defaults[CONF_RECOVERY_COOLDOWN]
                 ): vol.All(vol.Coerce(int), vol.Clamp(min=60, max=3600)),
+                vol.Optional(
+                    CONF_INVERT_LIGHT_TEMPERATURE,
+                    default=defaults[CONF_INVERT_LIGHT_TEMPERATURE],
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_EXPOSE_SETTABLE_TEXT,
+                    default=defaults[CONF_EXPOSE_SETTABLE_TEXT],
+                ): selector.BooleanSelector(),
             }
         )
         return self.async_show_form(
@@ -800,7 +824,7 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
         
         # Store device_id to display_name mapping for parsing user input
         if not hasattr(self, "_device_id_to_display_name"):
-            self._device_id_to_display_name = {}
+            self._device_id_to_display_name: dict[str, str] = {}
         
         # Fetch devices and zones from Homey
         devices = {}
@@ -1093,16 +1117,20 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
         token_label = "API Key (leave blank to keep current)"
         poll_label = "Fallback polling interval (seconds)"
         recovery_label = "Recovery cooldown (seconds, between auto-recovery attempts)"
+        invert_temp_label = "Invert normalized light temperature (fixes warm/cold reversal)"
+        expose_text_label = "Expose settable string capabilities as text inputs"
         if user_input is not None:
             host = user_input[host_label].strip().rstrip("/")
             token = user_input.get(token_label, "").strip()
             poll_interval = user_input.get(poll_label, DEFAULT_POLL_INTERVAL)
             recovery_cooldown = user_input.get(recovery_label, DEFAULT_RECOVERY_COOLDOWN)
+            invert_temp = user_input.get(invert_temp_label, False)
+            expose_text = user_input.get(expose_text_label, DEFAULT_EXPOSE_SETTABLE_TEXT)
 
             if not host.startswith(("http://", "https://")):
                 host = f"http://{host}"
 
-            new_data = {**self._entry.data, CONF_HOST: host}
+            new_data = {**self._entry.data, CONF_HOST: host, CONF_INVERT_LIGHT_TEMPERATURE: invert_temp}
             if token:
                 new_data[CONF_TOKEN] = token
 
@@ -1110,6 +1138,8 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
                 **self._entry.options,
                 CONF_POLL_INTERVAL: poll_interval,
                 CONF_RECOVERY_COOLDOWN: recovery_cooldown,
+                CONF_INVERT_LIGHT_TEMPERATURE: invert_temp,
+                CONF_EXPOSE_SETTABLE_TEXT: expose_text,
             }
 
             self.hass.config_entries.async_update_entry(
@@ -1124,6 +1154,14 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
             poll_label: self._entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL),
             recovery_label: self._entry.options.get(
                 CONF_RECOVERY_COOLDOWN, DEFAULT_RECOVERY_COOLDOWN
+            ),
+            invert_temp_label: self._entry.options.get(
+                CONF_INVERT_LIGHT_TEMPERATURE,
+                self._entry.data.get(CONF_INVERT_LIGHT_TEMPERATURE, DEFAULT_INVERT_LIGHT_TEMPERATURE),
+            ),
+            expose_text_label: self._entry.options.get(
+                CONF_EXPOSE_SETTABLE_TEXT,
+                self._entry.data.get(CONF_EXPOSE_SETTABLE_TEXT, DEFAULT_EXPOSE_SETTABLE_TEXT),
             ),
         }
         options_schema = vol.Schema(
@@ -1142,6 +1180,12 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
                         min=60, max=3600, step=30, mode=selector.NumberSelectorMode.BOX
                     )
                 ),
+                vol.Optional(
+                    invert_temp_label, default=defaults[invert_temp_label]
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    expose_text_label, default=defaults[expose_text_label]
+                ): selector.BooleanSelector(),
             }
         )
         return self.async_show_form(

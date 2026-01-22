@@ -12,7 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import HomeyDataUpdateCoordinator
-from .device_info import get_device_info
+from .device_info import build_entity_unique_id, get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,6 +35,8 @@ async def async_setup_entry(
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+    multi_homey = hass.data[DOMAIN][entry.entry_id].get("multi_homey", False)
+    homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
     devices = coordinator.data if coordinator.data else await api.get_devices()
@@ -53,7 +55,7 @@ async def async_setup_entry(
                 # Check if capability has options/values (enum type)
                 if "values" in cap_data or "options" in cap_data or cap_data.get("type") == "enum":
                     entities.append(
-                        HomeySelect(coordinator, device_id, device, capability_id, cap_data, api, zones)
+                        HomeySelect(coordinator, device_id, device, capability_id, cap_data, api, zones, homey_id, multi_homey)
                     )
         
         # Then, handle ALL enum-type capabilities generically (including unknown ones)
@@ -64,7 +66,7 @@ async def async_setup_entry(
                 continue
             
             # Check if this is an enum-type capability
-            if cap_data.get("type") == "enum" and ("values" in cap_data or "options" in cap_data):
+            if cap_data.get("type") in ("enum", "string") and ("values" in cap_data or "options" in cap_data):
                 # Skip internal Homey maintenance buttons
                 capability_lower = capability_id.lower()
                 if any(keyword in capability_lower for keyword in ["migrate", "reset", "identify"]):
@@ -78,7 +80,7 @@ async def async_setup_entry(
                     continue
                 
                 entities.append(
-                    HomeySelect(coordinator, device_id, device, capability_id, cap_data, api, zones)
+                    HomeySelect(coordinator, device_id, device, capability_id, cap_data, api, zones, homey_id, multi_homey)
                 )
 
     async_add_entities(entities)
@@ -96,6 +98,8 @@ class HomeySelect(CoordinatorEntity, SelectEntity):
         capability_data: dict[str, Any],
         api,
         zones: dict[str, dict[str, Any]] | None = None,
+        homey_id: str | None = None,
+        multi_homey: bool = False,
     ) -> None:
         """Initialize the select entity."""
         super().__init__(coordinator)
@@ -104,10 +108,16 @@ class HomeySelect(CoordinatorEntity, SelectEntity):
         self._capability_id = capability_id
         self._capability_data = capability_data
         self._api = api
+        self._homey_id = homey_id
+        self._multi_homey = multi_homey
         
         device_name = device.get("name", "Unknown Device")
-        self._attr_name = f"{device_name} {capability_id.replace('_', ' ').title()}"
-        self._attr_unique_id = f"homey_{device_id}_{capability_id}"
+        capability_title = capability_data.get("title")
+        capability_label = capability_title or capability_id.replace("_", " ").title()
+        self._attr_name = f"{device_name} {capability_label}"
+        self._attr_unique_id = build_entity_unique_id(
+            homey_id, device_id, capability_id, multi_homey
+        )
         
         # Get options from capability data
         # Enum capabilities have "values" array with objects like {"id": "VERY_CHEAP", "title": "VERY_CHEAP"}
@@ -126,7 +136,9 @@ class HomeySelect(CoordinatorEntity, SelectEntity):
         else:
             self._attr_options = []
         
-        self._attr_device_info = get_device_info(device_id, device, zones)
+        self._attr_device_info = get_device_info(
+            self._homey_id, device_id, device, zones, self._multi_homey
+        )
 
     @property
     def current_option(self) -> str | None:

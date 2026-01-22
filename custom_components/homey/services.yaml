@@ -1,3 +1,9 @@
-# Services are registered programmatically in __init__.py
-# This file exists to prevent Home Assistant from showing an error
+test_capability_report:
+  name: Test Capability Report
+  description: Create a test notification with a GitHub issue link for reporting new capabilities.
+  fields:
+    entry_id:
+      name: Config Entry ID
+      description: Optional Homey config entry ID to target if multiple entries exist.
+      example: "abc123def456"
 

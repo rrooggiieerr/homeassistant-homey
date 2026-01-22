@@ -6,13 +6,16 @@ from datetime import timedelta
 import logging
 import time
 from typing import Any
+from urllib.parse import quote
 
+from homeassistant.components import persistent_notification
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import CONF_DEVICE_FILTER, DOMAIN
+from .const import CAPABILITY_REPORT_ISSUE_URL, CONF_DEVICE_FILTER, DOMAIN
+from .device_info import build_device_identifier, extract_device_id, split_device_identifier
 from .homey_api import HomeyAPI
 
 _LOGGER = logging.getLogger(__name__)
@@ -28,6 +31,8 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         zones: dict[str, dict[str, Any]] | None = None,
         update_interval: timedelta | None = None,
         recovery_cooldown: int | None = None,
+        homey_id: str | None = None,
+        multi_homey: bool = False,
     ) -> None:
         """Initialize the coordinator."""
         if update_interval is None:
@@ -60,15 +65,19 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             name="Homey",
             update_interval=update_interval,
         )
+        self.update_interval: timedelta | None = update_interval
         self.api = api
         self.hass = hass
         self.zones = zones or {}
+        self.homey_id = homey_id
+        self.multi_homey = multi_homey
         self._previous_device_ids: set[str] = set()
         self._last_recovery_attempt: float = 0.0
         self._recovery_cooldown: int = recovery_cooldown or 300  # seconds
         self._fallback_poll_interval: int = (
             update_interval.seconds if update_interval else 10
         )
+        self._known_capabilities: set[str] | None = None
         
         # Conditional batching: only batch when multiple updates arrive rapidly
         # Single updates process immediately for instant UI response
@@ -174,6 +183,9 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     )
                     return self.data or {}
             
+            # Detect newly seen capabilities and notify with a report link
+            self._detect_new_capabilities(devices)
+
             # Update device registry for name/room changes
             await self._update_device_registry(devices)
             
@@ -252,6 +264,114 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if recovered:
             _LOGGER.info("Homey API recovery successful - devices should repopulate shortly")
 
+    def _detect_new_capabilities(self, devices: dict[str, dict[str, Any]]) -> None:
+        """Detect newly seen capabilities and notify with a GitHub issue link."""
+        current_caps: set[str] = set()
+        caps_by_device: dict[str, set[str]] = {}
+
+        for device_id, device in devices.items():
+            capabilities = device.get("capabilitiesObj", {})
+            if not capabilities:
+                continue
+            cap_ids = set(capabilities.keys())
+            caps_by_device[device_id] = cap_ids
+            current_caps.update(cap_ids)
+
+        # Initialize baseline on first run to avoid noisy initial notification
+        if self._known_capabilities is None:
+            self._known_capabilities = current_caps
+            return
+
+        new_caps = current_caps - self._known_capabilities
+        if not new_caps:
+            return
+
+        self._known_capabilities.update(new_caps)
+        self._create_capability_notification(new_caps, devices, caps_by_device)
+
+    def _create_capability_notification(
+        self,
+        new_caps: set[str],
+        devices: dict[str, dict[str, Any]],
+        caps_by_device: dict[str, set[str]],
+    ) -> None:
+        """Create a persistent notification and GitHub issue link for new capabilities."""
+        device_lines: list[str] = []
+        body_device_lines: list[str] = []
+        for device_id, cap_ids in caps_by_device.items():
+            diff = sorted(cap_ids & new_caps)
+            if not diff:
+                continue
+            device = devices.get(device_id, {})
+            device_name = device.get("name", "Unknown Device")
+            device_class = device.get("class", "unknown")
+            driver_uri = device.get("driverUri", "unknown")
+            device_lines.append(f"- {device_name} ({device_id}): {', '.join(diff)}")
+            body_device_lines.append(
+                f"- {device_name}\n"
+                f"  - id: {device_id}\n"
+                f"  - class: {device_class}\n"
+                f"  - driverUri: {driver_uri}\n"
+                f"  - new capabilities: {', '.join(diff)}"
+            )
+
+        if not device_lines:
+            return
+
+        issue_title = "New Homey capability detected"
+        issue_labels = "enhancement"
+        body_lines = [
+            "## New Homey capability detected",
+            "",
+            f"New capabilities: {', '.join(sorted(new_caps))}",
+            "",
+            "### Devices",
+            *body_device_lines[:5],
+            "",
+            "### Notes",
+            "- Please describe which entities are missing or incorrect.",
+            "- Include screenshots if possible.",
+        ]
+        issue_body = "\n".join(body_lines)
+        issue_url = (
+            f"{CAPABILITY_REPORT_ISSUE_URL}"
+            f"?labels={quote(issue_labels)}&title={quote(issue_title)}&body={quote(issue_body)}"
+        )
+
+        message_lines = [
+            "New Homey capabilities detected:",
+            *device_lines[:10],
+        ]
+        if len(device_lines) > 10:
+            message_lines.append(f"...and {len(device_lines) - 10} more device(s).")
+        message_lines.append("")
+        message_lines.append(f"[Report this on GitHub]({issue_url})")
+
+        persistent_notification.async_create(
+            self.hass,
+            "\n".join(message_lines),
+            title="Homey: New capabilities detected",
+            notification_id=f"{DOMAIN}_new_capabilities",
+        )
+
+    def async_create_test_capability_notification(self) -> None:
+        """Create a test notification for capability reporting."""
+        devices = self.data or {}
+        if not devices:
+            persistent_notification.async_create(
+                self.hass,
+                "No devices available to build a test capability report.",
+                title="Homey: Test capability report",
+                notification_id=f"{DOMAIN}_test_capabilities",
+            )
+            return
+
+        # Use the first device as a representative target for the test report
+        device_id, device = next(iter(devices.items()))
+        caps_by_device = {device_id: {"test_capability"}}
+        new_caps = {"test_capability"}
+        self._create_capability_notification(new_caps, {device_id: device}, caps_by_device)
+
     async def _assign_areas_to_devices(self) -> None:
         """Assign areas to devices based on Homey zones during initial setup."""
         if not self.data:
@@ -263,7 +383,7 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         
         for device_id, device in self.data.items():
             device_entry = device_registry.async_get_device(
-                identifiers={(DOMAIN, device_id)}, connections=set()
+                identifiers={build_device_identifier(self.homey_id, device_id, self.multi_homey)}, connections=set()
             )
             
             if not device_entry:
@@ -302,7 +422,7 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         
         for device_id, device in devices.items():
             device_entry = device_registry.async_get_device(
-                identifiers={(DOMAIN, device_id)}, connections=set()
+                identifiers={build_device_identifier(self.homey_id, device_id, self.multi_homey)}, connections=set()
             )
             
             if not device_entry:
@@ -398,7 +518,7 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         
         for device_id in deleted_device_ids:
             device_entry = device_registry.async_get_device(
-                identifiers={(DOMAIN, device_id)}, connections=set()
+                identifiers={build_device_identifier(self.homey_id, device_id, self.multi_homey)}, connections=set()
             )
             
             if device_entry:
@@ -448,8 +568,11 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         for device_entry in device_registry.devices.values():
             # Check if this device belongs to our integration and this config entry
             for identifier in device_entry.identifiers:
-                if identifier[0] == DOMAIN:
-                    device_id = identifier[1]
+                homey_id, extracted = split_device_identifier(identifier)
+                if extracted and (
+                    not self.multi_homey or self.homey_id is None or homey_id == self.homey_id
+                ):
+                    device_id = extracted
                     
                     # Skip virtual devices - they should never be removed
                     if device_id in virtual_devices:
@@ -473,7 +596,10 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 # Verify this device still belongs to our integration
                 still_ours = False
                 for identifier in device_entry.identifiers:
-                    if identifier[0] == DOMAIN and identifier[1] == device_id:
+                    homey_id, extracted = split_device_identifier(identifier)
+                    if extracted and extracted == device_id and (
+                        not self.multi_homey or self.homey_id is None or homey_id == self.homey_id
+                    ):
                         still_ours = True
                         break
                 

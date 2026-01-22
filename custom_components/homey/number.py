@@ -12,13 +12,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import HomeyDataUpdateCoordinator
-from .device_info import get_device_info
+from .device_info import build_entity_unique_id, get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
 # Capabilities that should be exposed as number entities
 # These are numeric settings that users can control, not measurements
-NUMBER_CAPABILITIES = [
+NUMBER_CAPABILITIES: list[str] = [
     # Add capabilities here that need numeric input but aren't sensors
     # Example: "dim" could be here, but it's already handled by light platform
     # "some_setting": {"min": 0, "max": 100, "step": 1, "unit": "%"},
@@ -40,6 +40,8 @@ async def async_setup_entry(
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+    multi_homey = hass.data[DOMAIN][entry.entry_id].get("multi_homey", False)
+    homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
     devices = coordinator.data if coordinator.data else await api.get_devices()
@@ -58,7 +60,7 @@ async def async_setup_entry(
                 # Only add if settable (user can control it)
                 if cap_data.get("setable"):
                     entities.append(
-                        HomeyNumber(coordinator, device_id, device, capability_id, cap_data, api, zones)
+                        HomeyNumber(coordinator, device_id, device, capability_id, cap_data, api, zones, homey_id, multi_homey)
                     )
         
         # Check for pattern-based number capabilities (sub-capabilities)
@@ -91,7 +93,7 @@ async def async_setup_entry(
             
             if is_number_pattern or is_numeric_settable:
                 entities.append(
-                    HomeyNumber(coordinator, device_id, device, capability_id, cap_data, api, zones)
+                    HomeyNumber(coordinator, device_id, device, capability_id, cap_data, api, zones, homey_id, multi_homey)
                 )
 
     async_add_entities(entities)
@@ -109,6 +111,8 @@ class HomeyNumber(CoordinatorEntity, NumberEntity):
         capability_data: dict[str, Any],
         api,
         zones: dict[str, dict[str, Any]] | None = None,
+        homey_id: str | None = None,
+        multi_homey: bool = False,
     ) -> None:
         """Initialize the number entity."""
         super().__init__(coordinator)
@@ -117,10 +121,14 @@ class HomeyNumber(CoordinatorEntity, NumberEntity):
         self._capability_id = capability_id
         self._capability_data = capability_data
         self._api = api
+        self._homey_id = homey_id
+        self._multi_homey = multi_homey
         
         device_name = device.get("name", "Unknown Device")
         self._attr_name = f"{device_name} {capability_id.replace('_', ' ').title()}"
-        self._attr_unique_id = f"homey_{device_id}_{capability_id}"
+        self._attr_unique_id = build_entity_unique_id(
+            homey_id, device_id, capability_id, multi_homey
+        )
         
         # Get min/max/step from capability data
         self._attr_native_min_value = capability_data.get("min", 0)
@@ -132,7 +140,9 @@ class HomeyNumber(CoordinatorEntity, NumberEntity):
         if unit:
             self._attr_native_unit_of_measurement = unit
         
-        self._attr_device_info = get_device_info(device_id, device, zones)
+        self._attr_device_info = get_device_info(
+            self._homey_id, device_id, device, zones, self._multi_homey
+        )
 
     @property
     def native_value(self) -> float | None:

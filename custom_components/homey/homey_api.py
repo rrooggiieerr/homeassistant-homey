@@ -385,6 +385,30 @@ class HomeyAPI:
         )
         return False
 
+    async def get_system_info(self) -> dict[str, Any] | None:
+        """Fetch system info from Homey, if available."""
+        if not self.session:
+            return None
+
+        endpoints_to_try = [
+            f"{API_BASE_MANAGER}/system",
+            f"{API_BASE_MANAGER}/system/",
+            API_SYSTEM,
+            f"{API_BASE_V1}/manager/system/info",
+            f"{API_BASE_V1}/manager/system",
+            f"{API_BASE_V1}/system/info",
+            f"{API_BASE_V1}/system",
+        ]
+
+        for endpoint in endpoints_to_try:
+            try:
+                async with self.session.get(f"{self.host}{endpoint}") as response:
+                    if response.status == 200:
+                        return await response.json()
+            except Exception:
+                continue
+        return None
+
     def _convert_capability_value(self, capability_id: str, value: Any) -> Any:
         """Convert value to appropriate type and format for the capability.
         
@@ -1269,6 +1293,11 @@ class HomeyAPI:
                 
                 self._api_connected_evt = asyncio.Event()
                 self._api_connect_error = None
+
+                if self.sio is None:
+                    _LOGGER.error("Socket.IO client not initialized; cannot connect /api namespace")
+                    return False
+                sio = self.sio
                 
                 # Set up namespace-specific event handlers for /api namespace
                 def on_api_connect():
@@ -1282,31 +1311,36 @@ class HomeyAPI:
                     if self._api_connected_evt:
                         self._api_connected_evt.set()  # Unblock waiter even on error
                 
-                self.sio.on("connect", on_api_connect, namespace=self.sio_namespace)
-                self.sio.on("connect_error", on_api_connect_error, namespace=self.sio_namespace)
+                sio.on("connect", on_api_connect, namespace=self.sio_namespace)
+                sio.on("connect_error", on_api_connect_error, namespace=self.sio_namespace)
                 
                 # Helper to send packet with fallback for different python-socketio versions
                 async def _send_packet(pkt: Packet):
                     """Send packet using available internal API with fallback."""
-                    if hasattr(self.sio, "_send_packet"):
-                        await self.sio._send_packet(pkt)
-                    elif hasattr(self.sio, "_send_packet_internal"):
-                        await self.sio._send_packet_internal(pkt)
+                    if hasattr(sio, "_send_packet"):
+                        await sio._send_packet(pkt)
+                    elif hasattr(sio, "_send_packet_internal"):
+                        await sio._send_packet_internal(pkt)
                     else:
                         # Last resort: encode then send via engineio
                         encoded = pkt.encode()
-                        await self.sio.eio.send(encoded)
+                        await sio.eio.send(encoded)
                 
                 # Try both payload shapes, but send them as proper Packets
                 # Socket.IO packet types: 0=CONNECT, 1=DISCONNECT, 2=EVENT, 3=ACK, 4=CONNECT_ERROR
-                for idx, payload in enumerate(
-                    ({"token": token}, {"auth": {"token": token}}),
-                    start=1,
-                ):
-                    _LOGGER.debug("  → Attempt %d: CONNECT /api with payload keys: %s", idx, list(payload.keys()))
+                payloads: list[dict[str, Any]] = [
+                    {"token": token},
+                    {"auth": {"token": token}},
+                ]
+                for idx, payload_data in enumerate(payloads, start=1):
+                    _LOGGER.debug(
+                        "  → Attempt %d: CONNECT /api with payload keys: %s",
+                        idx,
+                        list(payload_data.keys()),
+                    )
                     
                     # Create proper Socket.IO CONNECT packet (type 0 = CONNECT)
-                    pkt = Packet(packet_type=0, namespace=self.sio_namespace, data=payload)
+                    pkt = Packet(packet_type=0, namespace=self.sio_namespace, data=payload_data)
                     
                     # Encode packet and log length for debugging
                     encoded = pkt.encode()
@@ -1321,7 +1355,7 @@ class HomeyAPI:
                         pass
                     
                     # Check if namespace is actually connected (connect_error may not fire if server ignores)
-                    connected_namespaces = set(getattr(self.sio, "namespaces", {}).keys())
+                    connected_namespaces = set(getattr(sio, "namespaces", {}).keys())
                     if self.sio_namespace in connected_namespaces:
                         _LOGGER.debug("  → Attempt %d SUCCESS - Namespace %s connected", idx, self.sio_namespace)
                         return True
@@ -1331,8 +1365,11 @@ class HomeyAPI:
                     if idx < 2:  # Log failure only if we have more attempts
                         _LOGGER.debug("  → Attempt %d failed, trying next format...", idx)
                 
-                _LOGGER.error("FAILED to connect /api. connected namespaces=%s, last_error=%s",
-                              set(getattr(self.sio, "namespaces", {}).keys()), self._api_connect_error)
+                _LOGGER.error(
+                    "FAILED to connect /api. connected namespaces=%s, last_error=%s",
+                    set(getattr(sio, "namespaces", {}).keys()),
+                    self._api_connect_error,
+                )
                 return False
             
             try:

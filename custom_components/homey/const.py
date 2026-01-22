@@ -9,10 +9,20 @@ CONF_DEVICE_FILTER = "device_filter"
 CONF_WORKING_ENDPOINT = "working_endpoint"  # Store which endpoint structure worked
 CONF_POLL_INTERVAL = "poll_interval"
 CONF_RECOVERY_COOLDOWN = "recovery_cooldown"
+CONF_INVERT_LIGHT_TEMPERATURE = "invert_light_temperature"
+CONF_EXPOSE_SETTABLE_TEXT = "expose_settable_text"
 
 DEFAULT_NAME = "Homey"
 DEFAULT_POLL_INTERVAL = 10  # seconds (fallback when Socket.IO is down)
 DEFAULT_RECOVERY_COOLDOWN = 300  # seconds
+DEFAULT_INVERT_LIGHT_TEMPERATURE = True
+DEFAULT_EXPOSE_SETTABLE_TEXT = False
+
+# GitHub issue URL for reporting new/unknown capabilities
+CAPABILITY_REPORT_ISSUE_URL = "https://github.com/ifMike/homeyHASS/issues/new"
+
+# Services
+SERVICE_TEST_CAPABILITY_REPORT = "test_capability_report"
 
 # Homey API endpoints
 # Try manager API structure first (based on Homey API documentation)
