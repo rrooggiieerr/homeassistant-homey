@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.6-dev.7-multi] - 2026-01-22
+
+### Added
+- **Multi-homey unique IDs**: Entity unique IDs are now scoped per Homey hub to prevent collisions
+
+### Fixed
+- **Entity registration conflicts**: Avoid duplicate entity warnings for multi-homey sensors
+- **CI type checks**: Mypy is enforced again after fixing type errors
+
 ## [1.1.6-dev.6-multi] - 2026-01-22
 
 ### Added
