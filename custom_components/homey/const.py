@@ -18,7 +18,7 @@ DEFAULT_POLL_INTERVAL = 10  # seconds (fallback when Socket.IO is down)
 DEFAULT_RECOVERY_COOLDOWN = 300  # seconds
 DEFAULT_INVERT_LIGHT_TEMPERATURE = True
 DEFAULT_EXPOSE_SETTABLE_TEXT = False
-DEFAULT_EXPOSE_READONLY_STRINGS = False
+DEFAULT_EXPOSE_READONLY_STRINGS = True
 
 # GitHub issue URL for reporting new/unknown capabilities
 CAPABILITY_REPORT_ISSUE_URL = "https://github.com/ifMike/homeyHASS/issues/new"

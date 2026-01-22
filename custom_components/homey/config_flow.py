@@ -1127,19 +1127,16 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle connection and polling settings."""
-        host_label = "Homey IP Address or Hostname"
-        token_label = "API Key (leave blank to keep current)"
-        poll_label = "Fallback polling interval (seconds)"
-        recovery_label = "Recovery cooldown (seconds, between auto-recovery attempts)"
-        invert_temp_label = "Invert normalized light temperature (fixes warm/cold reversal)"
-        expose_text_label = "Expose settable string capabilities as text inputs"
         if user_input is not None:
-            host = user_input[host_label].strip().rstrip("/")
-            token = user_input.get(token_label, "").strip()
-            poll_interval = user_input.get(poll_label, DEFAULT_POLL_INTERVAL)
-            recovery_cooldown = user_input.get(recovery_label, DEFAULT_RECOVERY_COOLDOWN)
-            invert_temp = user_input.get(invert_temp_label, False)
-            expose_text = user_input.get(expose_text_label, DEFAULT_EXPOSE_SETTABLE_TEXT)
+            host = user_input[CONF_HOST].strip().rstrip("/")
+            token = user_input.get(CONF_TOKEN, "").strip()
+            poll_interval = user_input.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
+            recovery_cooldown = user_input.get(CONF_RECOVERY_COOLDOWN, DEFAULT_RECOVERY_COOLDOWN)
+            invert_temp = user_input.get(CONF_INVERT_LIGHT_TEMPERATURE, False)
+            expose_text = user_input.get(CONF_EXPOSE_SETTABLE_TEXT, DEFAULT_EXPOSE_SETTABLE_TEXT)
+            expose_readonly_strings = user_input.get(
+                CONF_EXPOSE_READONLY_STRINGS, DEFAULT_EXPOSE_READONLY_STRINGS
+            )
 
             if not host.startswith(("http://", "https://")):
                 host = f"http://{host}"
@@ -1154,6 +1151,7 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_RECOVERY_COOLDOWN: recovery_cooldown,
                 CONF_INVERT_LIGHT_TEMPERATURE: invert_temp,
                 CONF_EXPOSE_SETTABLE_TEXT: expose_text,
+                CONF_EXPOSE_READONLY_STRINGS: expose_readonly_strings,
             }
 
             self.hass.config_entries.async_update_entry(
@@ -1163,42 +1161,50 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data={})
 
         defaults = {
-            host_label: self._entry.data.get(CONF_HOST, ""),
-            token_label: "",
-            poll_label: self._entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL),
-            recovery_label: self._entry.options.get(
+            CONF_HOST: self._entry.data.get(CONF_HOST, ""),
+            CONF_TOKEN: "",
+            CONF_POLL_INTERVAL: self._entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL),
+            CONF_RECOVERY_COOLDOWN: self._entry.options.get(
                 CONF_RECOVERY_COOLDOWN, DEFAULT_RECOVERY_COOLDOWN
             ),
-            invert_temp_label: self._entry.options.get(
+            CONF_INVERT_LIGHT_TEMPERATURE: self._entry.options.get(
                 CONF_INVERT_LIGHT_TEMPERATURE,
                 self._entry.data.get(CONF_INVERT_LIGHT_TEMPERATURE, DEFAULT_INVERT_LIGHT_TEMPERATURE),
             ),
-            expose_text_label: self._entry.options.get(
+            CONF_EXPOSE_SETTABLE_TEXT: self._entry.options.get(
                 CONF_EXPOSE_SETTABLE_TEXT,
                 self._entry.data.get(CONF_EXPOSE_SETTABLE_TEXT, DEFAULT_EXPOSE_SETTABLE_TEXT),
+            ),
+            CONF_EXPOSE_READONLY_STRINGS: self._entry.options.get(
+                CONF_EXPOSE_READONLY_STRINGS,
+                self._entry.data.get(CONF_EXPOSE_READONLY_STRINGS, DEFAULT_EXPOSE_READONLY_STRINGS),
             ),
         }
         options_schema = vol.Schema(
             {
-                vol.Required(host_label, default=defaults[host_label]): str,
-                vol.Optional(token_label, default=defaults[token_label]): str,
-                vol.Required(poll_label, default=defaults[poll_label]): selector.NumberSelector(
+                vol.Required(CONF_HOST, default=defaults[CONF_HOST]): str,
+                vol.Optional(CONF_TOKEN, default=defaults[CONF_TOKEN]): str,
+                vol.Required(CONF_POLL_INTERVAL, default=defaults[CONF_POLL_INTERVAL]): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=5, max=60, step=1, mode=selector.NumberSelectorMode.BOX
                     )
                 ),
                 vol.Required(
-                    recovery_label, default=defaults[recovery_label]
+                    CONF_RECOVERY_COOLDOWN, default=defaults[CONF_RECOVERY_COOLDOWN]
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=60, max=3600, step=30, mode=selector.NumberSelectorMode.BOX
                     )
                 ),
                 vol.Optional(
-                    invert_temp_label, default=defaults[invert_temp_label]
+                    CONF_INVERT_LIGHT_TEMPERATURE, default=defaults[CONF_INVERT_LIGHT_TEMPERATURE]
                 ): selector.BooleanSelector(),
                 vol.Optional(
-                    expose_text_label, default=defaults[expose_text_label]
+                    CONF_EXPOSE_SETTABLE_TEXT, default=defaults[CONF_EXPOSE_SETTABLE_TEXT]
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_EXPOSE_READONLY_STRINGS,
+                    default=defaults[CONF_EXPOSE_READONLY_STRINGS],
                 ): selector.BooleanSelector(),
             }
         )
