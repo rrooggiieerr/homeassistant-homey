@@ -1328,11 +1328,11 @@ class HomeyAPI:
                 
                 # Try both payload shapes, but send them as proper Packets
                 # Socket.IO packet types: 0=CONNECT, 1=DISCONNECT, 2=EVENT, 3=ACK, 4=CONNECT_ERROR
-                for idx, payload in enumerate(
-                    ({"token": token}, {"auth": {"token": token}}),
-                    start=1,
-                ):
-                    payload_data: dict[str, Any] = payload
+                payloads: list[dict[str, Any]] = [
+                    {"token": token},
+                    {"auth": {"token": token}},
+                ]
+                for idx, payload_data in enumerate(payloads, start=1):
                     _LOGGER.debug(
                         "  → Attempt %d: CONNECT /api with payload keys: %s",
                         idx,

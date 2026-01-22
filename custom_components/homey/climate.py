@@ -485,7 +485,9 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
             mode_value = mode_cap_data.get("value")
             if mode_value:
                 mode_id = mode_value.get("id", mode_value.get("title", mode_value)) if isinstance(mode_value, dict) else str(mode_value)
-                mode_id_lower = mode_id.lower()
+                if mode_id is None:
+                    return HVACMode.HEAT_COOL
+                mode_id_lower = str(mode_id).lower()
                 if "off" in mode_id_lower or mode_id_lower == "off":
                     return HVACMode.OFF
                 elif "heat" in mode_id_lower and "energy" in mode_id_lower:
