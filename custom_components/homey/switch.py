@@ -10,9 +10,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import CAPABILITY_TO_PLATFORM, DOMAIN
 from .coordinator import HomeyDataUpdateCoordinator
 from .device_info import get_device_info
+from .button import is_maintenance_button
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -70,8 +71,36 @@ async def async_setup_entry(
             if cap_id.startswith("onoff."):
                 onoff_capabilities.append(cap_id)
         
-        # Skip if no onoff capabilities found
-        if not onoff_capabilities:
+        # Track additional boolean capabilities that should be switches
+        extra_switch_capabilities = []
+        for capability_id, cap_data in capabilities.items():
+            # Skip standard onoff (already handled)
+            if capability_id in onoff_capabilities or capability_id.startswith("onoff."):
+                continue
+
+            # Only settable boolean capabilities are eligible as switches
+            if cap_data.get("type") != "boolean" or not cap_data.get("setable"):
+                continue
+
+            # Skip capabilities handled by other platforms
+            mapped_platform = CAPABILITY_TO_PLATFORM.get(capability_id)
+            if mapped_platform and mapped_platform != "switch":
+                continue
+
+            # Skip button-like capabilities
+            is_button = (
+                capability_id == "button"
+                or capability_id.startswith("button.")
+                or capability_id.endswith("_button")
+                or capability_id.startswith("gardena_button.")
+            )
+            if is_button or is_maintenance_button(capability_id, cap_data):
+                continue
+
+            extra_switch_capabilities.append(capability_id)
+
+        # Skip if no switchable capabilities found
+        if not onoff_capabilities and not extra_switch_capabilities:
             continue
         
         # Skip if this device should be a light
@@ -118,6 +147,18 @@ async def async_setup_entry(
                     device_id,
                     device.get("name", "Unknown"),
                     onoff_cap,
+                    driver_uri or "unknown",
+                    device_class or "unknown"
+                )
+
+            # Create switches for other settable boolean capabilities
+            for capability_id in extra_switch_capabilities:
+                entities.append(HomeySwitch(coordinator, device_id, device, api, zones, capability_id, homey_id, multi_homey))
+                _LOGGER.info(
+                    "Created switch entity for device %s (%s) - capability: %s, driver: %s, class: %s",
+                    device_id,
+                    device.get("name", "Unknown"),
+                    capability_id,
                     driver_uri or "unknown",
                     device_class or "unknown"
                 )
@@ -173,10 +214,18 @@ class HomeySwitch(CoordinatorEntity, SwitchEntity):
         device_name = device.get("name", "Unknown Switch")
         if onoff_capability == "onoff":
             self._attr_name = device_name
-        else:
+        elif onoff_capability.startswith("onoff."):
             # Extract channel name from capability (e.g., "onoff.output1" -> "Output 1")
             channel = onoff_capability.replace("onoff.", "").replace("_", " ").title()
             self._attr_name = f"{device_name} {channel}"
+        else:
+            capability_title = (
+                device.get("capabilitiesObj", {})
+                .get(onoff_capability, {})
+                .get("title")
+            )
+            capability_label = capability_title or onoff_capability.replace("_", " ").title()
+            self._attr_name = f"{device_name} {capability_label}"
         
         # Create unique ID based on capability
         if onoff_capability == "onoff":

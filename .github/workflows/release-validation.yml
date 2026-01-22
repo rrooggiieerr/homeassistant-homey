@@ -1,0 +1,63 @@
+name: Release Validation
+
+on:
+  release:
+    types:
+      - published
+      - edited
+      - prereleased
+  workflow_dispatch:
+
+jobs:
+  validate-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate release naming and manifest version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TITLE: ${{ github.event.release.name }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+
+          tag = os.getenv("RELEASE_TAG") or ""
+          title = os.getenv("RELEASE_TITLE") or ""
+          body = os.getenv("RELEASE_BODY") or ""
+
+          if tag not in {"dev", "beta"}:
+            print(f"Release tag '{tag}' is not dev/beta; skipping rules.")
+            sys.exit(0)
+
+          match = re.fullmatch(r"v(\d+\.\d+\.\d+)-(dev|beta)\.(\d+)", title)
+          if not match:
+            print(
+              "Invalid release title. Expected format: vX.Y.Z-"
+              f"{tag}.N (example: v1.1.5-{tag}.9)."
+            )
+            sys.exit(1)
+
+          build_line = f"Build: {title}"
+          if build_line not in body:
+            print(f"Release notes must include exact line: {build_line}")
+            sys.exit(1)
+
+          manifest_path = "custom_components/homey/manifest.json"
+          with open(manifest_path, "r", encoding="utf-8") as handle:
+            manifest = json.load(handle)
+
+          manifest_version = manifest.get("version", "")
+          expected_version = title[1:]  # strip leading "v"
+          if manifest_version != expected_version:
+            print(
+              f"manifest.json version must be '{expected_version}', "
+              f"got '{manifest_version}'."
+            )
+            sys.exit(1)
+
+          print("Release naming and manifest version checks passed.")
+          PY

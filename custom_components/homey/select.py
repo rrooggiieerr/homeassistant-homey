@@ -66,7 +66,7 @@ async def async_setup_entry(
                 continue
             
             # Check if this is an enum-type capability
-            if cap_data.get("type") == "enum" and ("values" in cap_data or "options" in cap_data):
+            if cap_data.get("type") in ("enum", "string") and ("values" in cap_data or "options" in cap_data):
                 # Skip internal Homey maintenance buttons
                 capability_lower = capability_id.lower()
                 if any(keyword in capability_lower for keyword in ["migrate", "reset", "identify"]):
@@ -112,7 +112,9 @@ class HomeySelect(CoordinatorEntity, SelectEntity):
         self._multi_homey = multi_homey
         
         device_name = device.get("name", "Unknown Device")
-        self._attr_name = f"{device_name} {capability_id.replace('_', ' ').title()}"
+        capability_title = capability_data.get("title")
+        capability_label = capability_title or capability_id.replace("_", " ").title()
+        self._attr_name = f"{device_name} {capability_label}"
         self._attr_unique_id = f"homey_{device_id}_{capability_id}"
         
         # Get options from capability data

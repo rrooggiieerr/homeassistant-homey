@@ -98,6 +98,7 @@ PLATFORMS: list[Platform] = [
     Platform.BUTTON,  # For Homey flows and device buttons
     Platform.NUMBER,
     Platform.SELECT,
+    Platform.TEXT,
     Platform.SCENE,
     Platform.VACUUM,
 ]

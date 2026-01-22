@@ -9,10 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.6-dev.6-multi] - 2026-01-22
+
+### Added
+- **Text entities (optional)**: Expose settable string capabilities as editable text inputs via integration options
+- **Switch coverage**: Create switches for other settable boolean capabilities beyond `onoff`
+- **Enum/string selects**: Select entities now support string/enum capabilities with proper titles
+- **Automation checks**: CI now runs HASSfest, HACS, syntax, lint, type, test, and pre-commit checks
+
+### Fixed
+- **Binary sensor filtering**: Settable boolean capabilities no longer create duplicate binary sensors
+
 ## [1.1.6-dev.5-multi] - 2026-01-17
 
 ### Fixed
 - **Mixed cover capabilities**: Use `windowcoverings_set` for numeric position and `windowcoverings_state` for enum actions
+- **Release notes**: Appended cover capability fix to existing dev-multi notes
 
 ## [1.1.6-dev.4-multi] - 2026-01-17
 
@@ -730,4 +742,4 @@ When making changes:
 
 ---
 
-**Last Updated**: 2026-01-15
+**Last Updated**: 2026-01-22

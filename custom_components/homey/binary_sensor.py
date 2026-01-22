@@ -77,6 +77,10 @@ async def async_setup_entry(
         # First, handle explicitly mapped capabilities
         for capability_id in CAPABILITY_TO_DEVICE_CLASS:
             if capability_id in capabilities:
+                cap_data = capabilities.get(capability_id, {})
+                # Skip settable boolean capabilities - they should be switches
+                if cap_data.get("setable"):
+                    continue
                 entities.append(
                     HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones, homey_id, multi_homey)
                 )
@@ -97,7 +101,7 @@ async def async_setup_entry(
                 continue
             
             # Skip settable boolean capabilities that are buttons (handled by button platform)
-            # But include read-only boolean capabilities and settable ones that aren't buttons
+            # and other settable booleans (handled by switch platform)
             if cap_data.get("setable"):
                 # Check if it's a button capability (button, gardena_button.*, etc.)
                 is_button = (
@@ -108,6 +112,8 @@ async def async_setup_entry(
                 )
                 if is_button:
                     continue
+                # Skip settable booleans; they are handled by switch platform
+                continue
             
             # Skip internal Homey maintenance capabilities
             capability_lower = capability_id.lower()
