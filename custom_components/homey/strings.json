@@ -51,13 +51,14 @@
       },
       "settings": {
         "title": "Connection & Polling",
-        "description": "Update Homey connection settings and fallback polling. Leave API key blank to keep the current one. Polling is only used when Socket.IO is not working. For Socket.IO real-time updates, create a new API key with **System → View System** (`homey.system.readonly`).\n\nText input exposure: When enabled, settable string capabilities without predefined options will appear as editable text fields. Disable this if you want string capabilities to stay read-only unless they provide options.",
+        "description": "Update Homey connection settings and fallback polling. Leave API key blank to keep the current one. Polling is only used when Socket.IO is not working. For Socket.IO real-time updates, create a new API key with **System → View System** (`homey.system.readonly`).\n\nText input exposure: When enabled, settable string capabilities without predefined options will appear as editable text fields. Disable this if you want string capabilities to stay read-only unless they provide options.\n\nRead-only strings: When enabled, string capabilities will also be shown as read-only sensors (useful for status/notification fields).",
         "data": {
           "host": "Homey IP Address or Hostname",
           "token": "API Key (leave blank to keep current)",
           "poll_interval": "Fallback polling interval (seconds)",
           "recovery_cooldown": "Recovery cooldown (seconds, between auto-recovery attempts)",
-          "expose_settable_text": "Expose settable string capabilities as text inputs"
+          "expose_settable_text": "Expose settable string capabilities as text inputs",
+          "expose_readonly_strings": "Expose string capabilities as read-only sensors"
         }
       },
       "device_management": {

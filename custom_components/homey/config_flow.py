@@ -22,11 +22,13 @@ from .const import (
     CONF_RECOVERY_COOLDOWN,
     CONF_INVERT_LIGHT_TEMPERATURE,
     CONF_EXPOSE_SETTABLE_TEXT,
+    CONF_EXPOSE_READONLY_STRINGS,
     CONF_TOKEN,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_RECOVERY_COOLDOWN,
     DEFAULT_INVERT_LIGHT_TEMPERATURE,
     DEFAULT_EXPOSE_SETTABLE_TEXT,
+    DEFAULT_EXPOSE_READONLY_STRINGS,
     DOMAIN,
 )
 from .device_info import get_device_type
@@ -752,6 +754,9 @@ class HomeyOptionsFlowHandlerLegacy(config_entries.OptionsFlow):
             )
             invert_temp = user_input.get(CONF_INVERT_LIGHT_TEMPERATURE, False)
             expose_text = user_input.get(CONF_EXPOSE_SETTABLE_TEXT, DEFAULT_EXPOSE_SETTABLE_TEXT)
+            expose_readonly_strings = user_input.get(
+                CONF_EXPOSE_READONLY_STRINGS, DEFAULT_EXPOSE_READONLY_STRINGS
+            )
 
             if not host.startswith(("http://", "https://")):
                 host = f"http://{host}"
@@ -766,6 +771,7 @@ class HomeyOptionsFlowHandlerLegacy(config_entries.OptionsFlow):
                 CONF_RECOVERY_COOLDOWN: recovery_cooldown,
                 CONF_INVERT_LIGHT_TEMPERATURE: invert_temp,
                 CONF_EXPOSE_SETTABLE_TEXT: expose_text,
+                CONF_EXPOSE_READONLY_STRINGS: expose_readonly_strings,
             }
 
             self.hass.config_entries.async_update_entry(
@@ -791,6 +797,10 @@ class HomeyOptionsFlowHandlerLegacy(config_entries.OptionsFlow):
                 CONF_EXPOSE_SETTABLE_TEXT,
                 self.config_entry.data.get(CONF_EXPOSE_SETTABLE_TEXT, DEFAULT_EXPOSE_SETTABLE_TEXT),
             ),
+            CONF_EXPOSE_READONLY_STRINGS: self.config_entry.options.get(
+                CONF_EXPOSE_READONLY_STRINGS,
+                self.config_entry.data.get(CONF_EXPOSE_READONLY_STRINGS, DEFAULT_EXPOSE_READONLY_STRINGS),
+            ),
         }
         options_schema = vol.Schema(
             {
@@ -809,6 +819,10 @@ class HomeyOptionsFlowHandlerLegacy(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_EXPOSE_SETTABLE_TEXT,
                     default=defaults[CONF_EXPOSE_SETTABLE_TEXT],
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_EXPOSE_READONLY_STRINGS,
+                    default=defaults[CONF_EXPOSE_READONLY_STRINGS],
                 ): selector.BooleanSelector(),
             }
         )

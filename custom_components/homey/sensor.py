@@ -21,7 +21,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import (
+    CONF_EXPOSE_READONLY_STRINGS,
+    CONF_EXPOSE_SETTABLE_TEXT,
+    DEFAULT_EXPOSE_READONLY_STRINGS,
+    DEFAULT_EXPOSE_SETTABLE_TEXT,
+    DOMAIN,
+)
 from .coordinator import HomeyDataUpdateCoordinator
 from .device_info import build_entity_unique_id, get_device_info
 
@@ -298,6 +304,14 @@ async def async_setup_entry(
     homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
+    expose_readonly_strings = entry.options.get(
+        CONF_EXPOSE_READONLY_STRINGS,
+        entry.data.get(CONF_EXPOSE_READONLY_STRINGS, DEFAULT_EXPOSE_READONLY_STRINGS),
+    )
+    expose_settable_text = entry.options.get(
+        CONF_EXPOSE_SETTABLE_TEXT,
+        entry.data.get(CONF_EXPOSE_SETTABLE_TEXT, DEFAULT_EXPOSE_SETTABLE_TEXT),
+    )
     # Use coordinator data if available (more up-to-date), otherwise fetch fresh
     devices = coordinator.data if coordinator.data else await api.get_devices()
     
@@ -396,9 +410,10 @@ async def async_setup_entry(
             if not is_getable:
                 continue
 
-            # Skip settable values (they belong to number/select/light/climate/etc.)
+            # Skip settable values unless explicitly exposed as read-only strings
             if is_setable:
-                continue
+                if not expose_readonly_strings or cap_type != "string" or expose_settable_text:
+                    continue
 
             # Skip enums (handled by select)
             if cap_type == "enum":
@@ -406,6 +421,8 @@ async def async_setup_entry(
 
             # Only create for numeric or string data
             if cap_type in ("number", "string"):
+                if cap_type == "string" and ("values" in cap_data or "options" in cap_data):
+                    continue
                 entities.append(
                     HomeySensor(coordinator, device_id, device, capability_id, api, zones, homey_id, multi_homey)
                 )
