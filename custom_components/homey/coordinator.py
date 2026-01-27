@@ -748,3 +748,30 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             # Fall back to regular refresh request
             await self.async_request_refresh()
 
+
+class HomeyLogicUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
+    """Class to manage fetching Homey logic variables."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        api: HomeyAPI,
+        update_interval: timedelta | None = None,
+    ) -> None:
+        """Initialize the logic coordinator."""
+        super().__init__(
+            hass,
+            _LOGGER,
+            name="Homey Logic",
+            update_interval=update_interval,
+        )
+        self.api = api
+
+    async def _async_update_data(self) -> dict[str, dict[str, Any]]:
+        """Fetch logic variables from Homey."""
+        try:
+            return await self.api.get_logic_variables()
+        except Exception as err:
+            _LOGGER.debug("Logic variables update failed: %s", err)
+            raise UpdateFailed(f"Error communicating with Homey logic API: {err}") from err
+

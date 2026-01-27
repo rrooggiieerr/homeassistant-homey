@@ -34,6 +34,10 @@ class PermissionChecker:
             "read": "homey.mood.readonly",
             "write": "homey.mood.set",
         },
+        "logic": {
+            "read": "homey.logic.readonly",
+            "write": "homey.logic",
+        },
     }
     
     @staticmethod

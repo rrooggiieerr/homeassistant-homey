@@ -40,6 +40,7 @@ API_ADVANCED_FLOWS = f"{API_BASE_MANAGER}/flow/advancedflow"  # Advanced flows e
 API_ZONES = f"{API_BASE_MANAGER}/zones/zone"  # Rooms/zones in Homey
 API_SCENES = f"{API_BASE_MANAGER}/scene/scene"  # Scenes endpoint
 API_MOODS = f"{API_BASE_MANAGER}/moods/mood"  # Moods endpoint (plural "moods" per API v3)
+API_LOGIC_VARIABLES = f"{API_BASE_MANAGER}/logic/variable"  # Logic variables (number/string/boolean)
 
 # Device capability mappings to HA platforms
 CAPABILITY_TO_PLATFORM = {
