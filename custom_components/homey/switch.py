@@ -10,9 +10,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
-from .coordinator import HomeyDataUpdateCoordinator
-from .device_info import get_device_info
+from .const import CAPABILITY_TO_PLATFORM, DOMAIN
+from .coordinator import HomeyDataUpdateCoordinator, HomeyLogicUpdateCoordinator
+from .device_info import build_entity_unique_id, get_device_info
+from .button import is_maintenance_button
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,8 +25,11 @@ async def async_setup_entry(
 ) -> None:
     """Set up Homey switches from a config entry."""
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    logic_coordinator: HomeyLogicUpdateCoordinator | None = hass.data[DOMAIN][entry.entry_id].get("logic_coordinator")
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+    multi_homey = hass.data[DOMAIN][entry.entry_id].get("multi_homey", False)
+    homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
     # Use coordinator data if available (more up-to-date), otherwise fetch fresh
@@ -68,8 +72,36 @@ async def async_setup_entry(
             if cap_id.startswith("onoff."):
                 onoff_capabilities.append(cap_id)
         
-        # Skip if no onoff capabilities found
-        if not onoff_capabilities:
+        # Track additional boolean capabilities that should be switches
+        extra_switch_capabilities = []
+        for capability_id, cap_data in capabilities.items():
+            # Skip standard onoff (already handled)
+            if capability_id in onoff_capabilities or capability_id.startswith("onoff."):
+                continue
+
+            # Only settable boolean capabilities are eligible as switches
+            if cap_data.get("type") != "boolean" or not cap_data.get("setable"):
+                continue
+
+            # Skip capabilities handled by other platforms
+            mapped_platform = CAPABILITY_TO_PLATFORM.get(capability_id)
+            if mapped_platform and mapped_platform != "switch":
+                continue
+
+            # Skip button-like capabilities
+            is_button = (
+                capability_id == "button"
+                or capability_id.startswith("button.")
+                or capability_id.endswith("_button")
+                or capability_id.startswith("gardena_button.")
+            )
+            if is_button or is_maintenance_button(capability_id, cap_data):
+                continue
+
+            extra_switch_capabilities.append(capability_id)
+
+        # Skip if no switchable capabilities found
+        if not onoff_capabilities and not extra_switch_capabilities:
             continue
         
         # Skip if this device should be a light
@@ -110,12 +142,24 @@ async def async_setup_entry(
             # Create switch entity for each onoff capability
             # For multi-channel devices, this creates multiple switch entities
             for onoff_cap in onoff_capabilities:
-                entities.append(HomeySwitch(coordinator, device_id, device, api, zones, onoff_cap))
+                entities.append(HomeySwitch(coordinator, device_id, device, api, zones, onoff_cap, homey_id, multi_homey))
                 _LOGGER.info(
                     "Created switch entity for device %s (%s) - capability: %s, driver: %s, class: %s",
                     device_id,
                     device.get("name", "Unknown"),
                     onoff_cap,
+                    driver_uri or "unknown",
+                    device_class or "unknown"
+                )
+
+            # Create switches for other settable boolean capabilities
+            for capability_id in extra_switch_capabilities:
+                entities.append(HomeySwitch(coordinator, device_id, device, api, zones, capability_id, homey_id, multi_homey))
+                _LOGGER.info(
+                    "Created switch entity for device %s (%s) - capability: %s, driver: %s, class: %s",
+                    device_id,
+                    device.get("name", "Unknown"),
+                    capability_id,
                     driver_uri or "unknown",
                     device_class or "unknown"
                 )
@@ -132,6 +176,26 @@ async def async_setup_entry(
     
     _LOGGER.info("Created %d switch entities", len(entities))
 
+    # Add Homey Logic boolean variables (not device capabilities)
+    if logic_coordinator:
+        logic_variables = (
+            logic_coordinator.data
+            if logic_coordinator.data is not None
+            else await api.get_logic_variables()
+        )
+        for variable_id, variable in logic_variables.items():
+            if variable.get("type") == "boolean":
+                entities.append(
+                    HomeyLogicSwitch(
+                        logic_coordinator,
+                        variable_id,
+                        variable,
+                        api,
+                        homey_id,
+                        multi_homey,
+                    )
+                )
+
     async_add_entities(entities)
 
 
@@ -146,6 +210,8 @@ class HomeySwitch(CoordinatorEntity, SwitchEntity):
         api,
         zones: dict[str, dict[str, Any]] | None = None,
         onoff_capability: str = "onoff",
+        homey_id: str | None = None,
+        multi_homey: bool = False,
     ) -> None:
         """Initialize the switch.
         
@@ -162,24 +228,40 @@ class HomeySwitch(CoordinatorEntity, SwitchEntity):
         self._device = device
         self._api = api
         self._onoff_capability = onoff_capability
+        self._homey_id = homey_id
+        self._multi_homey = multi_homey
         
         # Create entity name based on capability
         device_name = device.get("name", "Unknown Switch")
         if onoff_capability == "onoff":
             self._attr_name = device_name
-        else:
+        elif onoff_capability.startswith("onoff."):
             # Extract channel name from capability (e.g., "onoff.output1" -> "Output 1")
             channel = onoff_capability.replace("onoff.", "").replace("_", " ").title()
             self._attr_name = f"{device_name} {channel}"
+        else:
+            capability_title = (
+                device.get("capabilitiesObj", {})
+                .get(onoff_capability, {})
+                .get("title")
+            )
+            capability_label = capability_title or onoff_capability.replace("_", " ").title()
+            self._attr_name = f"{device_name} {capability_label}"
         
         # Create unique ID based on capability
         if onoff_capability == "onoff":
-            self._attr_unique_id = f"homey_{device_id}_onoff"
+            self._attr_unique_id = build_entity_unique_id(
+                homey_id, device_id, "onoff", multi_homey
+            )
         else:
             # Use capability ID in unique_id (e.g., "homey_{device_id}_onoff.output1")
-            self._attr_unique_id = f"homey_{device_id}_{onoff_capability}"
+            self._attr_unique_id = build_entity_unique_id(
+                homey_id, device_id, onoff_capability, multi_homey
+            )
         
-        self._attr_device_info = get_device_info(device_id, device, zones)
+        self._attr_device_info = get_device_info(
+            self._homey_id, device_id, device, zones, self._multi_homey
+        )
 
     @property
     def is_on(self) -> bool | None:
@@ -219,3 +301,64 @@ class HomeySwitch(CoordinatorEntity, SwitchEntity):
         
         capabilities = device_data.get("capabilitiesObj", {})
         return self._onoff_capability in capabilities
+
+
+class HomeyLogicSwitch(CoordinatorEntity, SwitchEntity):
+    """Representation of a Homey logic boolean variable."""
+
+    def __init__(
+        self,
+        coordinator: HomeyLogicUpdateCoordinator,
+        variable_id: str,
+        variable: dict[str, Any],
+        api,
+        homey_id: str | None = None,
+        multi_homey: bool = False,
+    ) -> None:
+        """Initialize the logic switch entity."""
+        super().__init__(coordinator)
+        self._variable_id = variable_id
+        self._variable = variable
+        self._api = api
+        self._homey_id = homey_id
+        self._multi_homey = multi_homey
+
+        variable_name = variable.get("name", "Logic Boolean")
+        self._attr_name = variable_name
+        self._attr_unique_id = build_entity_unique_id(
+            homey_id, "logic", f"boolean_{variable_id}", multi_homey
+        )
+
+        logic_identifier = f"{homey_id}:logic" if (multi_homey and homey_id) else "logic"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, logic_identifier)},
+            "name": "Homey Logic",
+            "manufacturer": "Athom",
+            "model": "Homey",
+        }
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return true if the variable is on."""
+        variables = self.coordinator.data or {}
+        variable = variables.get(self._variable_id, self._variable)
+        value = variable.get("value")
+        if value is None:
+            return None
+        return bool(value)
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Turn the logic boolean on."""
+        success = await self._api.update_logic_variable(self._variable_id, True)
+        if success:
+            await self.coordinator.async_request_refresh()
+        else:
+            _LOGGER.error("Failed to set logic variable %s to True", self._variable_id)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn the logic boolean off."""
+        success = await self._api.update_logic_variable(self._variable_id, False)
+        if success:
+            await self.coordinator.async_request_refresh()
+        else:
+            _LOGGER.error("Failed to set logic variable %s to False", self._variable_id)

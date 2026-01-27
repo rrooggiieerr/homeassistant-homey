@@ -15,7 +15,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import HomeyDataUpdateCoordinator
-from .device_info import get_device_info
+from .device_info import build_entity_unique_id, get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,6 +44,10 @@ CAPABILITY_TO_DEVICE_CLASS = {
     "water_box_attached": None,  # Generic binary sensor
     "mop_attached": None,  # Generic binary sensor
     "mop_dry_status": None,  # Generic binary sensor
+    # Heat pump / HVAC status flags
+    "compressor_active": BinarySensorDeviceClass.RUNNING,
+    "circulation_pump": BinarySensorDeviceClass.RUNNING,
+    "hot_water": BinarySensorDeviceClass.RUNNING,
 }
 
 
@@ -56,6 +60,8 @@ async def async_setup_entry(
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+    multi_homey = hass.data[DOMAIN][entry.entry_id].get("multi_homey", False)
+    homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
     # Use coordinator data if available (more up-to-date), otherwise fetch fresh
@@ -71,8 +77,12 @@ async def async_setup_entry(
         # First, handle explicitly mapped capabilities
         for capability_id in CAPABILITY_TO_DEVICE_CLASS:
             if capability_id in capabilities:
+                cap_data = capabilities.get(capability_id, {})
+                # Skip settable boolean capabilities - they should be switches
+                if cap_data.get("setable"):
+                    continue
                 entities.append(
-                    HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones)
+                    HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones, homey_id, multi_homey)
                 )
 
         # Then, handle ALL boolean capabilities generically (including unknown ones)
@@ -91,7 +101,7 @@ async def async_setup_entry(
                 continue
             
             # Skip settable boolean capabilities that are buttons (handled by button platform)
-            # But include read-only boolean capabilities and settable ones that aren't buttons
+            # and other settable booleans (handled by switch platform)
             if cap_data.get("setable"):
                 # Check if it's a button capability (button, gardena_button.*, etc.)
                 is_button = (
@@ -102,6 +112,8 @@ async def async_setup_entry(
                 )
                 if is_button:
                     continue
+                # Skip settable booleans; they are handled by switch platform
+                continue
             
             # Skip internal Homey maintenance capabilities
             capability_lower = capability_id.lower()
@@ -110,9 +122,9 @@ async def async_setup_entry(
                 continue
             
             # Create binary sensor for this boolean capability
-                entities.append(
-                    HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones)
-                )
+            entities.append(
+                HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones, homey_id, multi_homey)
+            )
 
     async_add_entities(entities)
 
@@ -128,6 +140,8 @@ class HomeyBinarySensor(CoordinatorEntity, BinarySensorEntity):
         capability_id: str,
         api,
         zones: dict[str, dict[str, Any]] | None = None,
+        homey_id: str | None = None,
+        multi_homey: bool = False,
     ) -> None:
         """Initialize the binary sensor."""
         super().__init__(coordinator)
@@ -135,6 +149,8 @@ class HomeyBinarySensor(CoordinatorEntity, BinarySensorEntity):
         self._device = device
         self._capability_id = capability_id
         self._api = api
+        self._homey_id = homey_id
+        self._multi_homey = multi_homey
 
         # Handle sub-capabilities (e.g., alarm_motion.outside)
         base_capability = capability_id.split(".")[0] if "." in capability_id else capability_id
@@ -150,10 +166,14 @@ class HomeyBinarySensor(CoordinatorEntity, BinarySensorEntity):
             # Regular capability
             self._attr_name = f"{device.get('name', 'Unknown')} {capability_id.replace('alarm_', '').replace('_', ' ').title()}"
         
-        self._attr_unique_id = f"homey_{device_id}_{capability_id}"
+        self._attr_unique_id = build_entity_unique_id(
+            homey_id, device_id, capability_id, multi_homey
+        )
         self._attr_device_class = CAPABILITY_TO_DEVICE_CLASS.get(base_capability)
 
-        self._attr_device_info = get_device_info(device_id, device, zones)
+        self._attr_device_info = get_device_info(
+            self._homey_id, device_id, device, zones, self._multi_homey
+        )
 
     @property
     def is_on(self) -> bool:

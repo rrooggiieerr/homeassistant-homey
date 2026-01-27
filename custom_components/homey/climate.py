@@ -17,7 +17,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import HomeyDataUpdateCoordinator
-from .device_info import get_device_info
+from .device_info import build_entity_unique_id, get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,6 +31,8 @@ async def async_setup_entry(
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+    multi_homey = hass.data[DOMAIN][entry.entry_id].get("multi_homey", False)
+    homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
     # Use coordinator data if available (more up-to-date), otherwise fetch fresh
@@ -70,10 +72,10 @@ async def async_setup_entry(
         
         # Create climate entity if it has target_temperature OR is a devicegroups climate group
         if "target_temperature" in capabilities:
-            entities.append(HomeyClimate(coordinator, device_id, device, api, zones))
+            entities.append(HomeyClimate(coordinator, device_id, device, api, zones, homey_id, multi_homey))
             _LOGGER.debug("Created climate entity for device %s (has target_temperature)", device_name)
         elif is_devicegroups_climate:
-            entities.append(HomeyClimate(coordinator, device_id, device, api, zones))
+            entities.append(HomeyClimate(coordinator, device_id, device, api, zones, homey_id, multi_homey))
             _LOGGER.info(
                 "Created climate entity for devicegroups group: %s (id: %s, class: %s) - note: no target_temperature capability",
                 device_name,
@@ -94,14 +96,20 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
         device: dict[str, Any],
         api,
         zones: dict[str, dict[str, Any]] | None = None,
+        homey_id: str | None = None,
+        multi_homey: bool = False,
     ) -> None:
         """Initialize the climate device."""
         super().__init__(coordinator)
         self._device_id = device_id
         self._device = device
         self._api = api
+        self._homey_id = homey_id
+        self._multi_homey = multi_homey
         self._attr_name = device.get("name", "Unknown Climate")
-        self._attr_unique_id = f"homey_{device_id}_climate"
+        self._attr_unique_id = build_entity_unique_id(
+            homey_id, device_id, "climate", multi_homey
+        )
         self._attr_temperature_unit = UnitOfTemperature.CELSIUS
         capabilities = device.get("capabilitiesObj", {})
         supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
@@ -163,7 +171,9 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
             # Example: thermofloor_mode has ["Heat", "Energy Save Heat", "Off", "Cool"]
             for mode_value in mode_values:
                 mode_id = mode_value.get("id", mode_value.get("title", mode_value)) if isinstance(mode_value, dict) else str(mode_value)
-                mode_id_lower = mode_id.lower()
+                if mode_id is None:
+                    continue
+                mode_id_lower = str(mode_id).lower()
                 if "off" in mode_id_lower or mode_id_lower == "off":
                     if HVACMode.OFF not in hvac_modes:
                         hvac_modes.append(HVACMode.OFF)
@@ -222,7 +232,9 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
             mode_value = mode_cap_data.get("value")
             if mode_value:
                 mode_id = mode_value.get("id", mode_value.get("title", mode_value)) if isinstance(mode_value, dict) else str(mode_value)
-                mode_id_lower = mode_id.lower()
+                if mode_id is None:
+                    return HVACMode.HEAT_COOL
+                mode_id_lower = str(mode_id).lower()
                 if "off" in mode_id_lower or mode_id_lower == "off":
                     current_mode = HVACMode.OFF
                 elif "heat" in mode_id_lower and "energy" in mode_id_lower:
@@ -276,7 +288,9 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
             # Default to 0.5°C steps
             self._attr_target_temperature_step = 0.5
 
-        self._attr_device_info = get_device_info(device_id, device, zones)
+        self._attr_device_info = get_device_info(
+            self._homey_id, device_id, device, zones, self._multi_homey
+        )
 
     @property
     def current_temperature(self) -> float | None:
@@ -429,7 +443,10 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
             # Find matching mode value
             for mode_value_obj in mode_values:
                 mode_id = mode_value_obj.get("id", mode_value_obj.get("title", mode_value_obj)) if isinstance(mode_value_obj, dict) else str(mode_value_obj)
-                if mode_id in target_modes or mode_id.lower() in [m.lower() for m in target_modes]:
+                if mode_id is None:
+                    continue
+                mode_id_str = str(mode_id)
+                if mode_id_str in target_modes or mode_id_str.lower() in [m.lower() for m in target_modes]:
                     await self._api.set_capability_value(self._device_id, self._custom_mode_capability, mode_id)
                     await self.coordinator.async_refresh_device(self._device_id)
                     return
@@ -470,7 +487,9 @@ class HomeyClimate(CoordinatorEntity, ClimateEntity):
             mode_value = mode_cap_data.get("value")
             if mode_value:
                 mode_id = mode_value.get("id", mode_value.get("title", mode_value)) if isinstance(mode_value, dict) else str(mode_value)
-                mode_id_lower = mode_id.lower()
+                if mode_id is None:
+                    return HVACMode.HEAT_COOL
+                mode_id_lower = str(mode_id).lower()
                 if "off" in mode_id_lower or mode_id_lower == "off":
                     return HVACMode.OFF
                 elif "heat" in mode_id_lower and "energy" in mode_id_lower:

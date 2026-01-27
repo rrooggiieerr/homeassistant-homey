@@ -10,17 +10,25 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
+from homeassistant.components import persistent_notification
 from homeassistant.helpers import selector
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.update_coordinator import UpdateFailed
+import voluptuous as vol
 
 from .const import (
+    CONF_HOST,
     CONF_DEVICE_FILTER,
     CONF_POLL_INTERVAL,
     CONF_RECOVERY_COOLDOWN,
+    SERVICE_TEST_CAPABILITY_REPORT,
     DOMAIN,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_RECOVERY_COOLDOWN,
 )
-from .coordinator import HomeyDataUpdateCoordinator
+from .coordinator import HomeyDataUpdateCoordinator, HomeyLogicUpdateCoordinator
+from .device_info import build_device_identifier, extract_device_id
 from .homey_api import HomeyAPI
 
 _LOGGER = logging.getLogger(__name__)
@@ -91,6 +99,7 @@ PLATFORMS: list[Platform] = [
     Platform.BUTTON,  # For Homey flows and device buttons
     Platform.NUMBER,
     Platform.SELECT,
+    Platform.TEXT,
     Platform.SCENE,
     Platform.VACUUM,
 ]
@@ -109,8 +118,9 @@ async def async_remove_config_entry_device(
     # Find the device_id from the device entry identifiers
     device_id = None
     for identifier in device_entry.identifiers:
-        if identifier[0] == DOMAIN:
-            device_id = identifier[1]
+        extracted = extract_device_id(identifier)
+        if extracted:
+            device_id = extracted
             break
     
     if not device_id:
@@ -210,6 +220,48 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Fetch zones (rooms) for device organization
     zones = await api.get_zones()
+    homey_id = api.homey_id or entry.data.get("host")
+    if api.homey_id is None:
+        _LOGGER.warning(
+            "Homey ID not available yet; falling back to host for device scoping (%s). "
+            "If this host changes later, devices may need rescoping.",
+            entry.data.get("host"),
+        )
+        persistent_notification.async_create(
+            hass,
+            "Homey ID not available yet; using host for device scoping. "
+            "Once Homey ID is available, devices will be rescoped automatically.",
+            title="Homey: Pending device rescope",
+            notification_id=f"{DOMAIN}_pending_rescope",
+        )
+
+    # Warn if another entry points to the same Homey (host or homey_id)
+    for other_entry in hass.config_entries.async_entries(DOMAIN):
+        if other_entry.entry_id == entry.entry_id:
+            continue
+        if (
+            other_entry.data.get("homey_id") == homey_id
+            or other_entry.data.get(CONF_HOST) == entry.data.get(CONF_HOST)
+        ):
+            _LOGGER.warning(
+                "Another Homey entry (%s) appears to target the same Homey (%s). "
+                "This can cause device collisions.",
+                other_entry.entry_id,
+                homey_id,
+            )
+            persistent_notification.async_create(
+                hass,
+                "Another Homey entry appears to target the same hub. "
+                "This can cause device collisions. Consider removing the duplicate entry.",
+                title="Homey: Duplicate hub detected",
+                notification_id=f"{DOMAIN}_duplicate_hub",
+            )
+            break
+
+    # Enable multi-homey mode only when more than one hub is configured
+    entries = hass.config_entries.async_entries(DOMAIN)
+    if len(entries) > 1 and not hass.data[DOMAIN].get("multi_homey_enabled"):
+        await _async_enable_multi_homey(hass)
     
     # Create coordinator (pass zones so it can update device registry)
     poll_interval = entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
@@ -220,14 +272,72 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         zones,
         update_interval=timedelta(seconds=poll_interval),
         recovery_cooldown=recovery_cooldown,
+        homey_id=homey_id,
+        multi_homey=hass.data[DOMAIN].get("multi_homey_enabled", False),
     )
     await coordinator.async_config_entry_first_refresh()
+
+    # Create logic variables coordinator (non-fatal if unavailable or permissions missing)
+    logic_coordinator = HomeyLogicUpdateCoordinator(
+        hass,
+        api,
+        update_interval=timedelta(seconds=poll_interval),
+    )
+    try:
+        await logic_coordinator.async_config_entry_first_refresh()
+    except UpdateFailed as err:
+        _LOGGER.debug("Logic variables unavailable during setup: %s", err)
+
+    # Persist resolved homey_id for future migrations
+    if entry.data.get("homey_id") != homey_id:
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, "homey_id": homey_id}
+        )
 
     hass.data[DOMAIN][entry.entry_id] = {
         "api": api,
         "coordinator": coordinator,
+        "logic_coordinator": logic_coordinator,
         "zones": coordinator.zones,  # Use zones from coordinator (will be updated periodically)
+        "homey_id": api.homey_id or entry.data.get("host"),
+        "multi_homey": hass.data[DOMAIN].get("multi_homey_enabled", False),
     }
+
+    # Register service to trigger test capability report (once per hass)
+    if not hass.data[DOMAIN].get("services_registered"):
+        async def async_test_capability_report(call) -> None:
+            """Create a test notification for capability reporting."""
+            entry_id = call.data.get("entry_id")
+            entry_data = None
+
+            if entry_id:
+                entry_data = hass.data[DOMAIN].get(entry_id)
+            else:
+                # Use the first available entry
+                if hass.data[DOMAIN]:
+                    for data_key, data_value in hass.data[DOMAIN].items():
+                        if isinstance(data_value, dict) and "coordinator" in data_value:
+                            entry_data = data_value
+                            break
+
+            if not entry_data:
+                _LOGGER.error("No Homey entry available to run test capability report")
+                return
+
+            coordinator_instance = entry_data.get("coordinator")
+            if not coordinator_instance:
+                _LOGGER.error("Homey coordinator not available for test capability report")
+                return
+
+            coordinator_instance.async_create_test_capability_notification()
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_TEST_CAPABILITY_REPORT,
+            async_test_capability_report,
+            schema=vol.Schema({vol.Optional("entry_id"): cv.string}),
+        )
+        hass.data[DOMAIN]["services_registered"] = True
 
     # Forward the setup to the platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -320,7 +430,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # The EntitySelector will show a dropdown of available Homey flow button entities
     # Note: In button card UI, you may need to manually enter entity_id if dropdown doesn't appear
     # Format: button.<flow_name> (e.g., button.sova)
-    import voluptuous as vol
     
     hass.services.async_register(
         DOMAIN,
@@ -424,6 +533,275 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.services.async_register(DOMAIN, "disable_flow", async_disable_flow)
 
     return True
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate old device identifiers and entity unique IDs."""
+    if entry.version >= 3:
+        return True
+
+    # Skip device ID migration when multi-homey isn't enabled, but still migrate entity unique_ids.
+    multi_homey_enabled = hass.data.get(DOMAIN, {}).get("multi_homey_enabled")
+    homey_id = entry.data.get("homey_id") or entry.data.get(CONF_HOST)
+    if not homey_id:
+        _LOGGER.debug("Skipping migration: missing homey_id")
+        return True
+
+    _LOGGER.info("Migrating Homey config entry from version %s", entry.version)
+
+    device_registry = dr.async_get(hass)
+    entity_registry = er.async_get(hass)
+
+    # Update entry data with resolved homey_id for future lookups
+    if entry.data.get("homey_id") != homey_id:
+        hass.config_entries.async_update_entry(
+            entry,
+            data={**entry.data, "homey_id": homey_id},
+        )
+
+    # Reattach entities for this entry to a Homey-scoped device entry
+    if multi_homey_enabled:
+        for entity_entry in entity_registry.entities.values():
+            config_entry_id = getattr(entity_entry, "config_entry_id", None)
+            if config_entry_id != entry.entry_id:
+                continue
+
+            if not entity_entry.device_id:
+                continue
+
+            device_entry = device_registry.async_get(entity_entry.device_id)
+            if not device_entry:
+                continue
+
+            # Find the legacy device_id for this integration
+            legacy_device_id = None
+            already_scoped = False
+            for identifier in device_entry.identifiers:
+                if identifier[0] != DOMAIN:
+                    continue
+                legacy_device_id = extract_device_id(identifier)
+                if legacy_device_id and ":" in identifier[1]:
+                    already_scoped = True
+                    break
+
+            if not legacy_device_id or already_scoped:
+                continue
+
+            target_identifier = build_device_identifier(homey_id, legacy_device_id, True)
+            target_device = device_registry.async_get_device(
+                identifiers={target_identifier}, connections=set()
+            )
+            if not target_device:
+                target_device = device_registry.async_get_or_create(
+                    config_entry_id=entry.entry_id,
+                    identifiers={target_identifier},
+                    manufacturer=device_entry.manufacturer,
+                    model=device_entry.model,
+                    name=device_entry.name,
+                    suggested_area=device_entry.suggested_area,
+                )
+
+            entity_registry.async_update_entity(
+                entity_entry.entity_id, device_id=target_device.id
+            )
+
+    # Clean up legacy device entries with unscoped identifiers
+    if multi_homey_enabled:
+        legacy_devices = []
+        for device_entry in device_registry.devices.values():
+            for identifier in device_entry.identifiers:
+                if identifier[0] != DOMAIN:
+                    continue
+                if ":" in identifier[1]:
+                    continue
+                legacy_devices.append(device_entry)
+                break
+
+        for device_entry in legacy_devices:
+            # Only remove if no entities are still attached
+            has_entities = any(
+                ent.device_id == device_entry.id
+                for ent in entity_registry.entities.values()
+            )
+            if not has_entities:
+                device_registry.async_remove_device(device_entry.id)
+
+    # Update entity unique IDs to include the Homey ID for this entry.
+    updated = 0
+    for entity_entry in list(entity_registry.entities.values()):
+        config_entry_id = getattr(entity_entry, "config_entry_id", None)
+        if config_entry_id != entry.entry_id:
+            continue
+        if not entity_entry.unique_id:
+            continue
+        if not entity_entry.unique_id.startswith("homey_"):
+            continue
+        if entity_entry.unique_id.startswith(f"homey_{homey_id}_"):
+            continue
+
+        suffix = entity_entry.unique_id[len("homey_"):]
+        new_unique_id = f"homey_{homey_id}_{suffix}"
+        conflict = any(
+            ent.unique_id == new_unique_id and ent.config_entry_id == entry.entry_id
+            for ent in entity_registry.entities.values()
+        )
+        if conflict:
+            _LOGGER.warning(
+                "Skipping unique_id migration for %s due to conflict: %s",
+                entity_entry.entity_id,
+                new_unique_id,
+            )
+            continue
+
+        entity_registry.async_update_entity(
+            entity_entry.entity_id, new_unique_id=new_unique_id
+        )
+        updated += 1
+
+    entry.version = 3
+    _LOGGER.info(
+        "Homey config entry migration complete (updated %d unique IDs)", updated
+    )
+    return True
+
+
+async def _async_rescope_devices(
+    hass: HomeAssistant, entry: ConfigEntry, new_homey_id: str
+) -> None:
+    """Rescope devices when Homey ID becomes available or multi-homey is enabled."""
+    _LOGGER.info("Rescoping Homey devices to %s", new_homey_id)
+    device_registry = dr.async_get(hass)
+    entity_registry = er.async_get(hass)
+
+    # First, reattach entities for this entry
+    for entity_entry in entity_registry.entities.values():
+        config_entry_id = getattr(entity_entry, "config_entry_id", None)
+        if config_entry_id != entry.entry_id:
+            continue
+        if not entity_entry.device_id:
+            continue
+
+        device_entry = device_registry.async_get(entity_entry.device_id)
+        if not device_entry:
+            continue
+
+        legacy_device_id = None
+        already_scoped = False
+        for identifier in device_entry.identifiers:
+            if identifier[0] != DOMAIN:
+                continue
+            value = identifier[1]
+            legacy_device_id = extract_device_id(identifier)
+            if value.startswith(f"{new_homey_id}:"):
+                already_scoped = True
+                break
+
+        if not legacy_device_id or already_scoped:
+            continue
+
+        target_identifier = build_device_identifier(new_homey_id, legacy_device_id, True)
+        target_device = device_registry.async_get_device(
+            identifiers={target_identifier}, connections=set()
+        )
+        if not target_device:
+            target_device = device_registry.async_get_or_create(
+                config_entry_id=entry.entry_id,
+                identifiers={target_identifier},
+                manufacturer=device_entry.manufacturer,
+                model=device_entry.model,
+                name=device_entry.name,
+                suggested_area=device_entry.suggested_area,
+            )
+
+        entity_registry.async_update_entity(
+            entity_entry.entity_id, device_id=target_device.id
+        )
+
+    # Then, handle entities without config_entry_id but tied to our legacy devices
+    for device_entry in device_registry.devices.values():
+        legacy_device_id = None
+        already_scoped = False
+        for identifier in device_entry.identifiers:
+            if identifier[0] != DOMAIN:
+                continue
+            legacy_device_id = extract_device_id(identifier)
+            if ":" in identifier[1]:
+                already_scoped = True
+            break
+
+        if not legacy_device_id or already_scoped:
+            continue
+
+        # Reattach all entities from this legacy device to the scoped device
+        target_identifier = build_device_identifier(new_homey_id, legacy_device_id, True)
+        target_device = device_registry.async_get_device(
+            identifiers={target_identifier}, connections=set()
+        )
+        if not target_device:
+            target_device = device_registry.async_get_or_create(
+                config_entry_id=entry.entry_id,
+                identifiers={target_identifier},
+                manufacturer=device_entry.manufacturer,
+                model=device_entry.model,
+                name=device_entry.name,
+                suggested_area=device_entry.suggested_area,
+            )
+
+        for entity_entry in entity_registry.entities.values():
+            if entity_entry.device_id == device_entry.id:
+                entity_registry.async_update_entity(
+                    entity_entry.entity_id, device_id=target_device.id
+                )
+
+    _LOGGER.info("Rescoping Homey devices complete")
+
+
+async def _async_enable_multi_homey(hass: HomeAssistant) -> None:
+    """Enable multi-homey mode and rescope devices."""
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN]["multi_homey_enabled"] = True
+
+    persistent_notification.async_create(
+        hass,
+        "Multiple Homey hubs detected. Migrating device registry identifiers "
+        "to prevent collisions. This may create new devices once.",
+        title="Homey: Multi-hub migration",
+        notification_id=f"{DOMAIN}_multi_homey_migration",
+    )
+
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.domain != DOMAIN:
+            continue
+        homey_id = entry.data.get("homey_id") or entry.data.get(CONF_HOST)
+        hass.config_entries.async_update_entry(
+            entry,
+            data={**entry.data, "homey_id": homey_id, "multi_homey_enabled": True},
+        )
+        await _async_rescope_devices(hass, entry, homey_id)
+
+    # Remove legacy unscoped devices only if no entities remain
+    device_registry = dr.async_get(hass)
+    entity_registry = er.async_get(hass)
+    for device_entry in list(device_registry.devices.values()):
+        for identifier in device_entry.identifiers:
+            if identifier[0] != DOMAIN:
+                continue
+            if ":" in identifier[1]:
+                continue
+            has_entities = any(
+                ent.device_id == device_entry.id
+                for ent in entity_registry.entities.values()
+            )
+            if not has_entities:
+                device_registry.async_remove_device(device_entry.id)
+            break
+
+    persistent_notification.async_create(
+        hass,
+        "Multi-hub migration completed. If you see duplicate devices, remove the old ones.",
+        title="Homey: Multi-hub migration complete",
+        notification_id=f"{DOMAIN}_multi_homey_migration_done",
+    )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

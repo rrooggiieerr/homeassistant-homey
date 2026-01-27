@@ -25,6 +25,7 @@ from .const import (
     API_ZONES,
     API_SCENES,
     API_MOODS,
+    API_LOGIC_VARIABLES,
 )
 from .permissions import PermissionChecker
 
@@ -52,6 +53,7 @@ class HomeyAPI:
         self.zones: dict[str, dict[str, Any]] = {}  # Rooms/zones
         self.scenes: dict[str, dict[str, Any]] = {}  # Scenes
         self.moods: dict[str, dict[str, Any]] = {}  # Moods
+        self.logic_variables: dict[str, dict[str, Any]] = {}  # Logic variables
         self._listeners: list[Callable[[str, dict[str, Any]], None]] = []
         self._sio_connected: bool = False
         self._sio_reconnect_task: asyncio.Task | None = None
@@ -384,6 +386,30 @@ class HomeyAPI:
             [f"{endpoint} ({method})" for endpoint, method in endpoints_to_try[:5]],  # Show first 5
         )
         return False
+
+    async def get_system_info(self) -> dict[str, Any] | None:
+        """Fetch system info from Homey, if available."""
+        if not self.session:
+            return None
+
+        endpoints_to_try = [
+            f"{API_BASE_MANAGER}/system",
+            f"{API_BASE_MANAGER}/system/",
+            API_SYSTEM,
+            f"{API_BASE_V1}/manager/system/info",
+            f"{API_BASE_V1}/manager/system",
+            f"{API_BASE_V1}/system/info",
+            f"{API_BASE_V1}/system",
+        ]
+
+        for endpoint in endpoints_to_try:
+            try:
+                async with self.session.get(f"{self.host}{endpoint}") as response:
+                    if response.status == 200:
+                        return await response.json()
+            except Exception:
+                continue
+        return None
 
     def _convert_capability_value(self, capability_id: str, value: Any) -> Any:
         """Convert value to appropriate type and format for the capability.
@@ -902,6 +928,133 @@ class HomeyAPI:
             _LOGGER.debug("Moods endpoint not available - moods may not be supported or configured on this Homey")
         return {}
 
+    async def get_logic_variables(self) -> dict[str, dict[str, Any]]:
+        """Get all logic variables from Homey."""
+        if not self.session:
+            return {}
+
+        endpoints_to_try = [
+            API_LOGIC_VARIABLES,  # /api/manager/logic/variable
+            f"{API_LOGIC_VARIABLES}/",  # With trailing slash
+        ]
+
+        auth_error_count = 0
+        for endpoint in endpoints_to_try:
+            try:
+                async with self.session.get(f"{self.host}{endpoint}") as response:
+                    if response.status == 200:
+                        variables_data = await response.json()
+                        # Handle both array and object responses
+                        if isinstance(variables_data, dict):
+                            self.logic_variables = variables_data
+                        elif isinstance(variables_data, list):
+                            self.logic_variables = {
+                                variable["id"]: variable for variable in variables_data
+                            }
+                        else:
+                            self.logic_variables = {}
+
+                        if not self.logic_variables:
+                            _LOGGER.debug("Logic variables endpoint returned empty result")
+                        else:
+                            _LOGGER.info(
+                                "Successfully retrieved %d logic variables using endpoint: %s",
+                                len(self.logic_variables),
+                                endpoint,
+                            )
+                        return self.logic_variables
+                    elif response.status == 404:
+                        _LOGGER.debug(
+                            "Logic variables endpoint %s not found, trying next...",
+                            endpoint,
+                        )
+                        continue
+                    elif response.status in (401, 403):
+                        auth_error_count += 1
+                        PermissionChecker.check_permission(
+                            response.status, "logic", "read", "get_logic_variables"
+                        )
+                        continue
+                    else:
+                        _LOGGER.debug(
+                            "Failed to get logic variables from %s: %s",
+                            endpoint,
+                            response.status,
+                        )
+                        continue
+            except Exception as err:
+                _LOGGER.debug("Error getting logic variables from %s: %s", endpoint, err)
+                continue
+
+        if auth_error_count > 0:
+            _LOGGER.warning("Failed to get logic variables from any endpoint - permission issue")
+            PermissionChecker.log_missing_permission(
+                "logic",
+                "read",
+                "Logic variable entities will not be created. Enable homey.logic.readonly to import them.",
+            )
+        else:
+            _LOGGER.debug("Logic variables endpoint not available on this Homey")
+        return {}
+
+    async def update_logic_variable(self, variable_id: str, value: Any) -> bool:
+        """Update a Homey logic variable value."""
+        if not self.session:
+            return False
+
+        endpoints_to_try = [
+            f"{API_LOGIC_VARIABLES}/{variable_id}",
+            f"{API_LOGIC_VARIABLES}/{variable_id}/",
+        ]
+        payload = {"variable": {"value": value}}
+
+        for endpoint in endpoints_to_try:
+            try:
+                async with self.session.put(
+                    f"{self.host}{endpoint}",
+                    json=payload,
+                ) as response:
+                    if response.status in (200, 204):
+                        _LOGGER.debug(
+                            "Successfully updated logic variable %s via %s",
+                            variable_id,
+                            endpoint,
+                        )
+                        return True
+                    elif response.status == 404:
+                        _LOGGER.debug(
+                            "Logic variable endpoint %s not found, trying next...",
+                            endpoint,
+                        )
+                        continue
+                    elif response.status in (401, 403):
+                        PermissionChecker.check_permission(
+                            response.status, "logic", "write", f"update_logic_variable({variable_id})"
+                        )
+                        continue
+                    else:
+                        error_text = await response.text()
+                        _LOGGER.debug(
+                            "Failed to update logic variable %s via %s (%s): %s - %s",
+                            variable_id,
+                            endpoint,
+                            response.status,
+                            response.reason,
+                            error_text[:200] if error_text else "No error text",
+                        )
+                        continue
+            except Exception as err:
+                _LOGGER.debug(
+                    "Error updating logic variable %s via %s: %s",
+                    variable_id,
+                    endpoint,
+                    err,
+                )
+                continue
+
+        _LOGGER.error("Failed to update logic variable %s from any endpoint", variable_id)
+        return False
+
     async def trigger_mood(self, mood_id: str) -> bool:
         """Trigger a mood by ID."""
         if not self.session:
@@ -1269,6 +1422,11 @@ class HomeyAPI:
                 
                 self._api_connected_evt = asyncio.Event()
                 self._api_connect_error = None
+
+                if self.sio is None:
+                    _LOGGER.error("Socket.IO client not initialized; cannot connect /api namespace")
+                    return False
+                sio = self.sio
                 
                 # Set up namespace-specific event handlers for /api namespace
                 def on_api_connect():
@@ -1282,31 +1440,36 @@ class HomeyAPI:
                     if self._api_connected_evt:
                         self._api_connected_evt.set()  # Unblock waiter even on error
                 
-                self.sio.on("connect", on_api_connect, namespace=self.sio_namespace)
-                self.sio.on("connect_error", on_api_connect_error, namespace=self.sio_namespace)
+                sio.on("connect", on_api_connect, namespace=self.sio_namespace)
+                sio.on("connect_error", on_api_connect_error, namespace=self.sio_namespace)
                 
                 # Helper to send packet with fallback for different python-socketio versions
                 async def _send_packet(pkt: Packet):
                     """Send packet using available internal API with fallback."""
-                    if hasattr(self.sio, "_send_packet"):
-                        await self.sio._send_packet(pkt)
-                    elif hasattr(self.sio, "_send_packet_internal"):
-                        await self.sio._send_packet_internal(pkt)
+                    if hasattr(sio, "_send_packet"):
+                        await sio._send_packet(pkt)
+                    elif hasattr(sio, "_send_packet_internal"):
+                        await sio._send_packet_internal(pkt)
                     else:
                         # Last resort: encode then send via engineio
                         encoded = pkt.encode()
-                        await self.sio.eio.send(encoded)
+                        await sio.eio.send(encoded)
                 
                 # Try both payload shapes, but send them as proper Packets
                 # Socket.IO packet types: 0=CONNECT, 1=DISCONNECT, 2=EVENT, 3=ACK, 4=CONNECT_ERROR
-                for idx, payload in enumerate(
-                    ({"token": token}, {"auth": {"token": token}}),
-                    start=1,
-                ):
-                    _LOGGER.debug("  → Attempt %d: CONNECT /api with payload keys: %s", idx, list(payload.keys()))
+                payloads: list[dict[str, Any]] = [
+                    {"token": token},
+                    {"auth": {"token": token}},
+                ]
+                for idx, payload_data in enumerate(payloads, start=1):
+                    _LOGGER.debug(
+                        "  → Attempt %d: CONNECT /api with payload keys: %s",
+                        idx,
+                        list(payload_data.keys()),
+                    )
                     
                     # Create proper Socket.IO CONNECT packet (type 0 = CONNECT)
-                    pkt = Packet(packet_type=0, namespace=self.sio_namespace, data=payload)
+                    pkt = Packet(packet_type=0, namespace=self.sio_namespace, data=payload_data)
                     
                     # Encode packet and log length for debugging
                     encoded = pkt.encode()
@@ -1321,7 +1484,7 @@ class HomeyAPI:
                         pass
                     
                     # Check if namespace is actually connected (connect_error may not fire if server ignores)
-                    connected_namespaces = set(getattr(self.sio, "namespaces", {}).keys())
+                    connected_namespaces = set(getattr(sio, "namespaces", {}).keys())
                     if self.sio_namespace in connected_namespaces:
                         _LOGGER.debug("  → Attempt %d SUCCESS - Namespace %s connected", idx, self.sio_namespace)
                         return True
@@ -1331,8 +1494,11 @@ class HomeyAPI:
                     if idx < 2:  # Log failure only if we have more attempts
                         _LOGGER.debug("  → Attempt %d failed, trying next format...", idx)
                 
-                _LOGGER.error("FAILED to connect /api. connected namespaces=%s, last_error=%s",
-                              set(getattr(self.sio, "namespaces", {}).keys()), self._api_connect_error)
+                _LOGGER.error(
+                    "FAILED to connect /api. connected namespaces=%s, last_error=%s",
+                    set(getattr(sio, "namespaces", {}).keys()),
+                    self._api_connect_error,
+                )
                 return False
             
             try:

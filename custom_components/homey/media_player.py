@@ -16,7 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import HomeyDataUpdateCoordinator
-from .device_info import get_device_info
+from .device_info import build_entity_unique_id, get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,6 +30,8 @@ async def async_setup_entry(
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+    multi_homey = hass.data[DOMAIN][entry.entry_id].get("multi_homey", False)
+    homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
     # Use coordinator data if available (more up-to-date), otherwise fetch fresh
@@ -45,7 +47,7 @@ async def async_setup_entry(
             cap in capabilities
             for cap in ["volume_set", "speaker_playing", "speaker_next", "speaker_prev"]
         ):
-            entities.append(HomeyMediaPlayer(coordinator, device_id, device, api, zones))
+            entities.append(HomeyMediaPlayer(coordinator, device_id, device, api, zones, homey_id, multi_homey))
 
     async_add_entities(entities)
 
@@ -60,14 +62,20 @@ class HomeyMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
         device: dict[str, Any],
         api,
         zones: dict[str, dict[str, Any]] | None = None,
+        homey_id: str | None = None,
+        multi_homey: bool = False,
     ) -> None:
         """Initialize the media player."""
         super().__init__(coordinator)
         self._device_id = device_id
         self._device = device
         self._api = api
+        self._homey_id = homey_id
+        self._multi_homey = multi_homey
         self._attr_name = device.get("name", "Unknown Media Player")
-        self._attr_unique_id = f"homey_{device_id}_media_player"
+        self._attr_unique_id = build_entity_unique_id(
+            homey_id, device_id, "media_player", multi_homey
+        )
 
         capabilities = device.get("capabilitiesObj", {})
         supported_features = 0
@@ -85,7 +93,9 @@ class HomeyMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
 
         self._attr_supported_features = supported_features
 
-        self._attr_device_info = get_device_info(device_id, device, zones)
+        self._attr_device_info = get_device_info(
+            self._homey_id, device_id, device, zones, self._multi_homey
+        )
 
     @property
     def state(self) -> MediaPlayerState:

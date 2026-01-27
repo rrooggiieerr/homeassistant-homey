@@ -9,10 +9,22 @@ CONF_DEVICE_FILTER = "device_filter"
 CONF_WORKING_ENDPOINT = "working_endpoint"  # Store which endpoint structure worked
 CONF_POLL_INTERVAL = "poll_interval"
 CONF_RECOVERY_COOLDOWN = "recovery_cooldown"
+CONF_INVERT_LIGHT_TEMPERATURE = "invert_light_temperature"
+CONF_EXPOSE_SETTABLE_TEXT = "expose_settable_text"
+CONF_EXPOSE_READONLY_STRINGS = "expose_readonly_strings"
 
 DEFAULT_NAME = "Homey"
 DEFAULT_POLL_INTERVAL = 10  # seconds (fallback when Socket.IO is down)
 DEFAULT_RECOVERY_COOLDOWN = 300  # seconds
+DEFAULT_INVERT_LIGHT_TEMPERATURE = True
+DEFAULT_EXPOSE_SETTABLE_TEXT = False
+DEFAULT_EXPOSE_READONLY_STRINGS = True
+
+# GitHub issue URL for reporting new/unknown capabilities
+CAPABILITY_REPORT_ISSUE_URL = "https://github.com/ifMike/homeyHASS/issues/new"
+
+# Services
+SERVICE_TEST_CAPABILITY_REPORT = "test_capability_report"
 
 # Homey API endpoints
 # Try manager API structure first (based on Homey API documentation)
@@ -28,6 +40,7 @@ API_ADVANCED_FLOWS = f"{API_BASE_MANAGER}/flow/advancedflow"  # Advanced flows e
 API_ZONES = f"{API_BASE_MANAGER}/zones/zone"  # Rooms/zones in Homey
 API_SCENES = f"{API_BASE_MANAGER}/scene/scene"  # Scenes endpoint
 API_MOODS = f"{API_BASE_MANAGER}/moods/mood"  # Moods endpoint (plural "moods" per API v3)
+API_LOGIC_VARIABLES = f"{API_BASE_MANAGER}/logic/variable"  # Logic variables (number/string/boolean)
 
 # Device capability mappings to HA platforms
 CAPABILITY_TO_PLATFORM = {

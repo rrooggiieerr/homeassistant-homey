@@ -11,14 +11,14 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
-from .coordinator import HomeyDataUpdateCoordinator
-from .device_info import get_device_info
+from .coordinator import HomeyDataUpdateCoordinator, HomeyLogicUpdateCoordinator
+from .device_info import build_entity_unique_id, get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
 # Capabilities that should be exposed as number entities
 # These are numeric settings that users can control, not measurements
-NUMBER_CAPABILITIES = [
+NUMBER_CAPABILITIES: list[str] = [
     # Add capabilities here that need numeric input but aren't sensors
     # Example: "dim" could be here, but it's already handled by light platform
     # "some_setting": {"min": 0, "max": 100, "step": 1, "unit": "%"},
@@ -38,8 +38,11 @@ async def async_setup_entry(
 ) -> None:
     """Set up Homey number entities from a config entry."""
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    logic_coordinator: HomeyLogicUpdateCoordinator | None = hass.data[DOMAIN][entry.entry_id].get("logic_coordinator")
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
+    multi_homey = hass.data[DOMAIN][entry.entry_id].get("multi_homey", False)
+    homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
     devices = coordinator.data if coordinator.data else await api.get_devices()
@@ -58,7 +61,7 @@ async def async_setup_entry(
                 # Only add if settable (user can control it)
                 if cap_data.get("setable"):
                     entities.append(
-                        HomeyNumber(coordinator, device_id, device, capability_id, cap_data, api, zones)
+                        HomeyNumber(coordinator, device_id, device, capability_id, cap_data, api, zones, homey_id, multi_homey)
                     )
         
         # Check for pattern-based number capabilities (sub-capabilities)
@@ -91,7 +94,27 @@ async def async_setup_entry(
             
             if is_number_pattern or is_numeric_settable:
                 entities.append(
-                    HomeyNumber(coordinator, device_id, device, capability_id, cap_data, api, zones)
+                    HomeyNumber(coordinator, device_id, device, capability_id, cap_data, api, zones, homey_id, multi_homey)
+                )
+
+    # Add Homey Logic number variables (not device capabilities)
+    if logic_coordinator:
+        logic_variables = (
+            logic_coordinator.data
+            if logic_coordinator.data is not None
+            else await api.get_logic_variables()
+        )
+        for variable_id, variable in logic_variables.items():
+            if variable.get("type") == "number":
+                entities.append(
+                    HomeyLogicNumber(
+                        logic_coordinator,
+                        variable_id,
+                        variable,
+                        api,
+                        homey_id,
+                        multi_homey,
+                    )
                 )
 
     async_add_entities(entities)
@@ -109,6 +132,8 @@ class HomeyNumber(CoordinatorEntity, NumberEntity):
         capability_data: dict[str, Any],
         api,
         zones: dict[str, dict[str, Any]] | None = None,
+        homey_id: str | None = None,
+        multi_homey: bool = False,
     ) -> None:
         """Initialize the number entity."""
         super().__init__(coordinator)
@@ -117,10 +142,14 @@ class HomeyNumber(CoordinatorEntity, NumberEntity):
         self._capability_id = capability_id
         self._capability_data = capability_data
         self._api = api
+        self._homey_id = homey_id
+        self._multi_homey = multi_homey
         
         device_name = device.get("name", "Unknown Device")
         self._attr_name = f"{device_name} {capability_id.replace('_', ' ').title()}"
-        self._attr_unique_id = f"homey_{device_id}_{capability_id}"
+        self._attr_unique_id = build_entity_unique_id(
+            homey_id, device_id, capability_id, multi_homey
+        )
         
         # Get min/max/step from capability data
         self._attr_native_min_value = capability_data.get("min", 0)
@@ -132,7 +161,9 @@ class HomeyNumber(CoordinatorEntity, NumberEntity):
         if unit:
             self._attr_native_unit_of_measurement = unit
         
-        self._attr_device_info = get_device_info(device_id, device, zones)
+        self._attr_device_info = get_device_info(
+            self._homey_id, device_id, device, zones, self._multi_homey
+        )
 
     @property
     def native_value(self) -> float | None:
@@ -155,3 +186,78 @@ class HomeyNumber(CoordinatorEntity, NumberEntity):
             await self.coordinator.async_refresh_device(self._device_id)
         else:
             _LOGGER.error("Failed to set %s to %s for device %s", self._capability_id, value, self._device_id)
+
+
+class HomeyLogicNumber(CoordinatorEntity, NumberEntity):
+    """Representation of a Homey logic number variable."""
+
+    def __init__(
+        self,
+        coordinator: HomeyLogicUpdateCoordinator,
+        variable_id: str,
+        variable: dict[str, Any],
+        api,
+        homey_id: str | None = None,
+        multi_homey: bool = False,
+    ) -> None:
+        """Initialize the logic number entity."""
+        super().__init__(coordinator)
+        self._variable_id = variable_id
+        self._variable = variable
+        self._api = api
+        self._homey_id = homey_id
+        self._multi_homey = multi_homey
+
+        variable_name = variable.get("name", "Logic Number")
+        self._attr_name = variable_name
+        self._attr_unique_id = build_entity_unique_id(
+            homey_id, "logic", f"number_{variable_id}", multi_homey
+        )
+
+        # Logic variables don't provide min/max metadata; use a wide, safe range.
+        self._attr_native_min_value = -1_000_000_000.0
+        self._attr_native_max_value = 1_000_000_000.0
+        self._attr_native_step = 1.0
+
+        # Adjust step for decimal values if the current value is a float
+        value = variable.get("value")
+        if isinstance(value, float) and not value.is_integer():
+            self._attr_native_step = 0.01
+
+        logic_identifier = f"{homey_id}:logic" if (multi_homey and homey_id) else "logic"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, logic_identifier)},
+            "name": "Homey Logic",
+            "manufacturer": "Athom",
+            "model": "Homey",
+        }
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the current number value."""
+        variables = self.coordinator.data or {}
+        variable = variables.get(self._variable_id, self._variable)
+        value = variable.get("value")
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set the logic variable value."""
+        success = await self._api.update_logic_variable(self._variable_id, value)
+        if success:
+            _LOGGER.debug(
+                "Successfully updated logic variable %s to %s",
+                self._variable_id,
+                value,
+            )
+            await self.coordinator.async_request_refresh()
+        else:
+            _LOGGER.error(
+                "Failed to update logic variable %s to %s",
+                self._variable_id,
+                value,
+            )
