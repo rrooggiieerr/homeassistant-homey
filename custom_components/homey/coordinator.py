@@ -562,7 +562,9 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         devices_to_remove = []
         
         # Virtual devices that should never be removed (not real devices from Homey)
-        virtual_devices = {"flows"}  # "flows" is a virtual device for flow buttons
+        # "flows" is a virtual device for flow buttons
+        # "logic" is a virtual device for Homey Logic variables
+        virtual_devices = {"flows", "logic"}
         
         # Get all devices and check which ones belong to our integration
         for device_entry in device_registry.devices.values():
