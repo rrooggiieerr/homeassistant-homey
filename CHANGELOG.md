@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.6-beta.3] - 2026-01-27
+
+### Added
+- **Homey Logic variables**: Import Logic numbers, booleans, and strings as Number, Switch, and Text entities
+
+### Fixed
+- **Cover controls**: Prefer enum `windowcoverings_state` actions when supported, with numeric fallback for position control
+- **Logic device retention**: Prevent device filter cleanup from removing the Homey Logic device
+
 ## [1.1.6-beta.2] - 2026-01-22
 
 ### Added

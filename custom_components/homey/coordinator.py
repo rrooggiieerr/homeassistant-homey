@@ -562,7 +562,9 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         devices_to_remove = []
         
         # Virtual devices that should never be removed (not real devices from Homey)
-        virtual_devices = {"flows"}  # "flows" is a virtual device for flow buttons
+        # "flows" is a virtual device for flow buttons
+        # "logic" is a virtual device for Homey Logic variables
+        virtual_devices = {"flows", "logic"}
         
         # Get all devices and check which ones belong to our integration
         for device_entry in device_registry.devices.values():
@@ -747,4 +749,31 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             _LOGGER.debug("Error refreshing device %s: %s", device_id, err)
             # Fall back to regular refresh request
             await self.async_request_refresh()
+
+
+class HomeyLogicUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
+    """Class to manage fetching Homey logic variables."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        api: HomeyAPI,
+        update_interval: timedelta | None = None,
+    ) -> None:
+        """Initialize the logic coordinator."""
+        super().__init__(
+            hass,
+            _LOGGER,
+            name="Homey Logic",
+            update_interval=update_interval,
+        )
+        self.api = api
+
+    async def _async_update_data(self) -> dict[str, dict[str, Any]]:
+        """Fetch logic variables from Homey."""
+        try:
+            return await self.api.get_logic_variables()
+        except Exception as err:
+            _LOGGER.debug("Logic variables update failed: %s", err)
+            raise UpdateFailed(f"Error communicating with Homey logic API: {err}") from err
 

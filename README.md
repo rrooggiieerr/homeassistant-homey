@@ -4,7 +4,7 @@
 [![GitHub issues](https://img.shields.io/github/issues/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/issues)
 [![GitHub stars](https://img.shields.io/github/stars/ifMike/homeyHASS)](https://github.com/ifMike/homeyHASS/stargazers)
 
-**Version**: 1.1.6-beta.2 | **Last Updated**: 2026-01-22 | [Changelog](CHANGELOG.md)
+**Version**: 1.1.6-beta.3 | **Last Updated**: 2026-01-27 | [Changelog](CHANGELOG.md)
 
 A Homey integration for Home Assistant that automatically discovers and connects all your Homey devices, making them available natively in Home Assistant.
 
@@ -28,6 +28,7 @@ This Homey integration brings your [Homey](https://homey.app) hub into Home Assi
 - 🌡️ **Climate Control**: Thermostat support with target temperature and humidity control, plus HVAC mode support (OFF, HEAT, COOL, AUTO, HEAT_COOL)
 - 🎬 **Homey Flows**: Trigger, enable, and disable your Homey automations (Standard and Advanced Flows) from Home Assistant as button entities or via service calls
 - 🎭 **Scenes & Moods**: Activate Homey scenes and moods directly from Home Assistant
+- 🧠 **Homey Logic Variables**: Import Logic variables as native Number, Switch, and Text entities
 - 🔘 **Physical Buttons**: Physical device buttons appear as Button entities for automation triggers
 - 🎵 **Media Player Metadata**: Full media metadata support including artist, album, track, duration, position, shuffle, and repeat
 - 🏠 **Room Organization**: Automatically assigns devices to Home Assistant Areas based on Homey rooms
@@ -72,6 +73,7 @@ This Homey integration brings your [Homey](https://homey.app) hub into Home Assi
   - [Homey Flows (Automations)](#homey-flows-automations)
     - [1. Button Entities](#1-button-entities)
     - [2. Service Calls](#2-service-calls)
+  - [Homey Logic Variables](#homey-logic-variables)
   - [Homey Scenes and Moods](#homey-scenes-and-moods)
   - [Physical Device Buttons](#physical-device-buttons)
 - [Device Organization](#device-organization)
@@ -140,6 +142,8 @@ Before installing the integration, you need to create an API Key in Homey:
    - **Start Flows** (`homey.flow.start`) - **Recommended** to trigger, enable, and disable Flows
    - **View Moods** (`homey.mood.readonly`) - **Recommended** to list Moods (needed for Mood entities)
    - **Set Moods** (`homey.mood.set`) - **Recommended** to trigger Moods
+   - **View Variables** (`homey.logic.readonly`) - **Recommended** to list Logic variables (needed for Logic entities)
+   - **Variables** (`homey.logic`) - **Recommended** to update Logic variables from Home Assistant
    
    **Note on Scenes**: Scenes in Homey API v3 may not have separate permissions. Scene listing and activation likely use `homey.device.readonly` and `homey.device.control` permissions.
 
@@ -157,6 +161,8 @@ Before installing the integration, you need to create an API Key in Homey:
 | `homey.flow.start` | ⚠️ **Flow control disabled** - Cannot trigger, enable, or disable flows |
 | `homey.mood.readonly` | ⚠️ **Mood listing disabled** - Mood entities won't be created |
 | `homey.mood.set` | ⚠️ **Mood activation disabled** - Cannot activate moods |
+| `homey.logic.readonly` | ⚠️ **Logic variables disabled** - Logic entities won't be created |
+| `homey.logic` | ⚠️ **Logic updates disabled** - Cannot change Logic variables from Home Assistant |
 
 **Note**: The integration will log warnings in Home Assistant's logs when permissions are missing, but it won't break. Features requiring missing permissions will simply be disabled. However, `homey.system.readonly` is **required** for Socket.IO real-time updates - without it, the integration will use polling (5-10 second updates) instead of instant updates (< 1 second).
 
@@ -614,6 +620,20 @@ automation:
         data:
           flow_name: "Evening Scene"
 ```
+
+### Homey Logic Variables
+
+Homey Logic variables are imported as native Home Assistant entities:
+
+- **Number** variables → `number` entities
+- **Boolean** variables → `switch` entities
+- **String** variables → `text` entities
+
+**Prerequisites**:
+- **View Variables** (`homey.logic.readonly`) to list variables
+- **Variables** (`homey.logic`) to change values from Home Assistant
+
+**Note**: Logic variables are not devices in Homey, so they appear under a dedicated **"Homey Logic"** device in Home Assistant.
 
 ### Homey Scenes and Moods
 

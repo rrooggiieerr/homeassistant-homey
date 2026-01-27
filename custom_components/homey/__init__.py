@@ -14,6 +14,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.components import persistent_notification
 from homeassistant.helpers import selector
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.update_coordinator import UpdateFailed
 import voluptuous as vol
 
 from .const import (
@@ -26,7 +27,7 @@ from .const import (
     DEFAULT_POLL_INTERVAL,
     DEFAULT_RECOVERY_COOLDOWN,
 )
-from .coordinator import HomeyDataUpdateCoordinator
+from .coordinator import HomeyDataUpdateCoordinator, HomeyLogicUpdateCoordinator
 from .device_info import build_device_identifier, extract_device_id
 from .homey_api import HomeyAPI
 
@@ -276,6 +277,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     await coordinator.async_config_entry_first_refresh()
 
+    # Create logic variables coordinator (non-fatal if unavailable or permissions missing)
+    logic_coordinator = HomeyLogicUpdateCoordinator(
+        hass,
+        api,
+        update_interval=timedelta(seconds=poll_interval),
+    )
+    try:
+        await logic_coordinator.async_config_entry_first_refresh()
+    except UpdateFailed as err:
+        _LOGGER.debug("Logic variables unavailable during setup: %s", err)
+
     # Persist resolved homey_id for future migrations
     if entry.data.get("homey_id") != homey_id:
         hass.config_entries.async_update_entry(
@@ -285,6 +297,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = {
         "api": api,
         "coordinator": coordinator,
+        "logic_coordinator": logic_coordinator,
         "zones": coordinator.zones,  # Use zones from coordinator (will be updated periodically)
         "homey_id": api.homey_id or entry.data.get("host"),
         "multi_homey": hass.data[DOMAIN].get("multi_homey_enabled", False),

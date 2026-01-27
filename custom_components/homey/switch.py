@@ -11,7 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CAPABILITY_TO_PLATFORM, DOMAIN
-from .coordinator import HomeyDataUpdateCoordinator
+from .coordinator import HomeyDataUpdateCoordinator, HomeyLogicUpdateCoordinator
 from .device_info import build_entity_unique_id, get_device_info
 from .button import is_maintenance_button
 
@@ -25,6 +25,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up Homey switches from a config entry."""
     coordinator: HomeyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    logic_coordinator: HomeyLogicUpdateCoordinator | None = hass.data[DOMAIN][entry.entry_id].get("logic_coordinator")
     api = hass.data[DOMAIN][entry.entry_id]["api"]
     zones = hass.data[DOMAIN][entry.entry_id].get("zones", {})
     multi_homey = hass.data[DOMAIN][entry.entry_id].get("multi_homey", False)
@@ -175,6 +176,26 @@ async def async_setup_entry(
     
     _LOGGER.info("Created %d switch entities", len(entities))
 
+    # Add Homey Logic boolean variables (not device capabilities)
+    if logic_coordinator:
+        logic_variables = (
+            logic_coordinator.data
+            if logic_coordinator.data is not None
+            else await api.get_logic_variables()
+        )
+        for variable_id, variable in logic_variables.items():
+            if variable.get("type") == "boolean":
+                entities.append(
+                    HomeyLogicSwitch(
+                        logic_coordinator,
+                        variable_id,
+                        variable,
+                        api,
+                        homey_id,
+                        multi_homey,
+                    )
+                )
+
     async_add_entities(entities)
 
 
@@ -280,3 +301,64 @@ class HomeySwitch(CoordinatorEntity, SwitchEntity):
         
         capabilities = device_data.get("capabilitiesObj", {})
         return self._onoff_capability in capabilities
+
+
+class HomeyLogicSwitch(CoordinatorEntity, SwitchEntity):
+    """Representation of a Homey logic boolean variable."""
+
+    def __init__(
+        self,
+        coordinator: HomeyLogicUpdateCoordinator,
+        variable_id: str,
+        variable: dict[str, Any],
+        api,
+        homey_id: str | None = None,
+        multi_homey: bool = False,
+    ) -> None:
+        """Initialize the logic switch entity."""
+        super().__init__(coordinator)
+        self._variable_id = variable_id
+        self._variable = variable
+        self._api = api
+        self._homey_id = homey_id
+        self._multi_homey = multi_homey
+
+        variable_name = variable.get("name", "Logic Boolean")
+        self._attr_name = variable_name
+        self._attr_unique_id = build_entity_unique_id(
+            homey_id, "logic", f"boolean_{variable_id}", multi_homey
+        )
+
+        logic_identifier = f"{homey_id}:logic" if (multi_homey and homey_id) else "logic"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, logic_identifier)},
+            "name": "Homey Logic",
+            "manufacturer": "Athom",
+            "model": "Homey",
+        }
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return true if the variable is on."""
+        variables = self.coordinator.data or {}
+        variable = variables.get(self._variable_id, self._variable)
+        value = variable.get("value")
+        if value is None:
+            return None
+        return bool(value)
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Turn the logic boolean on."""
+        success = await self._api.update_logic_variable(self._variable_id, True)
+        if success:
+            await self.coordinator.async_request_refresh()
+        else:
+            _LOGGER.error("Failed to set logic variable %s to True", self._variable_id)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn the logic boolean off."""
+        success = await self._api.update_logic_variable(self._variable_id, False)
+        if success:
+            await self.coordinator.async_request_refresh()
+        else:
+            _LOGGER.error("Failed to set logic variable %s to False", self._variable_id)
