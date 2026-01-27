@@ -531,6 +531,7 @@ This is a significant release that dramatically expands device support and platf
 
 - **Unreleased**: Changes that are in development but not yet released
 - **Version numbers**: Follow semantic versioning (MAJOR.MINOR.PATCH)
+- **Release naming**: Stable releases should use `vX.Y.Z` for tags/titles (no dev/beta suffixes)
 - **Sections**: Added, Changed, Fixed, Removed, Known Issues
 - **Details**: Each entry should be clear and actionable
 - **README versioning**: Update the README with stable-only versions (no dev/beta), and summarize everything since the last main release
