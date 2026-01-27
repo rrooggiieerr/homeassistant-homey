@@ -17,9 +17,21 @@
 - Update Homey host/IP and API key from the integration options
 - More stable string exposure toggles and related settings
 
-### 🧰 Cover & Stability Fixes
-- Better handling for enum vs numeric cover capabilities
-- Prevents cleanup from removing the virtual "Homey Logic" device
+### ✅ Added
+- Read-only string sensors enabled by default (optional editable text entities)
+- Extra switch support for additional settable boolean capabilities
+- Enum/string select entities for mode-like capabilities
+- Capability reporting with prefilled GitHub issue links
+- Generic sensor coverage for numeric/string capabilities
+- Heat pump compressor counters (`compressor_hours`, `compressor_starts`)
+
+### 🧰 Fixes
+- Cover control handling for enum vs numeric capabilities
+- Prevent cleanup from removing the Homey Logic virtual device
+- Multi-homey entity collisions and migration gaps addressed
+- Light temperature inversion toggle persistence
+- Binary sensor filtering for settable booleans
+- Restored missing heat pump status entities
 
 For the full list of changes, additions, and fixes, see the [CHANGELOG](https://github.com/ifMike/homeyHASS/blob/v1.1.7/CHANGELOG.md).
 
