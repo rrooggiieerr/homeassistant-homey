@@ -11,85 +11,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.1.7] - 2026-01-27
 
+**Highlights**
+
+- **Multi-Homey**: Supports multiple hubs with auto-rescope and collision-safe IDs. Single‑hub users are unaffected and keep existing devices as-is.
+- **Logic Variables**: Numbers/booleans/strings now appear as entities. Ensure the API key includes `homey.logic.readonly` (and `homey.logic` for editing).
+- **Options & Settings**: Manage API key/host updates and tune string exposure plus advanced behaviors from the integration options.
+
 ### Added
 - **Homey Logic variables**: Import Logic numbers, booleans, and strings as Number, Switch, and Text entities
-
-### Fixed
-- **Cover controls**: Prefer enum `windowcoverings_state` actions when supported, with numeric fallback for position control
-- **Logic device retention**: Prevent device filter cleanup from removing the Homey Logic device
-
-## [1.1.6] - 2026-01-15
-
-## [1.1.6-dev.7-multi] - 2026-01-22
-
-### Added
-- **Multi-homey unique IDs**: Entity unique IDs are now scoped per Homey hub to prevent collisions
-
-### Fixed
-- **Entity registration conflicts**: Avoid duplicate entity warnings for multi-homey sensors
-- **CI type checks**: Mypy is enforced again after fixing type errors
-
-## [1.1.6-dev.6-multi] - 2026-01-22
-
-### Added
+- **Multi-homey guardrails**: Multi-homey activates only when 2+ hubs exist, with auto-rescope when a new hub is added
+- **Multi-homey unique IDs**: Entity and device identifiers are scoped per Homey hub to prevent collisions
+- **User notifications**: Pending rescope, migration start/finish, duplicate hub detection
+- **Read-only string sensors (default on)**: String capabilities can be exposed without enabling editable text inputs
 - **Text entities (optional)**: Expose settable string capabilities as editable text inputs via integration options
 - **Switch coverage**: Create switches for other settable boolean capabilities beyond `onoff`
 - **Enum/string selects**: Select entities now support string/enum capabilities with proper titles
-- **Automation checks**: CI now runs HASSfest, HACS, syntax, lint, type, test, and pre-commit checks
-
-### Fixed
-- **Binary sensor filtering**: Settable boolean capabilities no longer create duplicate binary sensors
-
-## [1.1.6-dev.5-multi] - 2026-01-17
-
-### Fixed
-- **Mixed cover capabilities**: Use `windowcoverings_set` for numeric position and `windowcoverings_state` for enum actions
-- **Release notes**: Appended cover capability fix to existing dev-multi notes
-
-## [1.1.6-dev.4-multi] - 2026-01-17
-
-### Added
-- **Multi-homey guardrails**: Multi-homey activates only when 2+ hubs exist
-- **Auto-rescope**: Rescopes devices when a second hub is added or Homey ID becomes available
-- **User notifications**: Pending rescope, migration start/finish, duplicate hub detection
-
-### Fixed
-- **Entity migration gaps**: Entities without config entry linkage are migrated by legacy identifiers
-
-## [1.1.6-dev.3] - 2026-01-17
-
-### Added
-- **Multi-Homey device scoping**: Device registry identifiers now include Homey ID to prevent collisions
-
-### Fixed
-- **Multi-Homey device removal**: Prevents devices from disappearing when multiple Homeys are configured
-- **Invert toggle persistence**: Light temperature inversion option now persists correctly in settings
-
-## [1.1.6-dev.2] - 2026-01-17
-
-### Added
 - **Capability reporting**: Notify when new capabilities appear with a prefilled GitHub issue link (auto-labeled `enhancement`)
 - **Light temperature option**: Toggle to invert normalized `light_temperature` for devices with warm/cold reversed
 - **Generic sensor coverage**: Create sensors for getable numeric/string capabilities beyond `measure_*` and `meter_*`
+- **Heat pump counters**: Added compressor counter sensors (`compressor_hours`, `compressor_starts`)
+- **Automation checks**: CI runs HASSfest, HACS, syntax, lint, type, test, and pre-commit checks
 
 ### Fixed
+- **Cover controls**: Use enum `windowcoverings_state` for actions and `windowcoverings_set` for numeric position where available
+- **Logic device retention**: Prevent device filter cleanup from removing the Homey Logic device
+- **Entity registration conflicts**: Avoid duplicate entity warnings for multi-homey sensors
+- **Entity migration gaps**: Entities without config entry linkage are migrated by legacy identifiers
+- **Multi-homey device removal**: Prevent devices from disappearing when multiple Homeys are configured
+- **Invert toggle persistence**: Light temperature inversion option now persists correctly in settings
+- **Options persistence**: String exposure toggles now persist reliably across reloads
+- **Binary sensor filtering**: Settable boolean capabilities no longer create duplicate binary sensors
 - **Heat pump status entities**: Restored missing boolean entities (e.g., `compressor_active`, `circulation_pump`, `hot_water`)
 - **Cover stop error**: Fixed `UnboundLocalError` when stopping enum-based curtains
 - **Service setup error**: Fixed `vol` import scoping issue during integration setup
 - **Light temperature default**: Invert normalized `light_temperature` by default (warm/cold correction)
-
-## [1.1.6-dev.1] - 2026-01-16
-
-### Changed
-- **Dev release**: Version bump for development branch
-
-## [1.1.5-dev.11] - 2026-01-16
-
-### Fixed
-- **Heat pump sensors**: Added compressor counter sensors (`compressor_hours`, `compressor_starts`)
 - **Light color temperature**: Expose color temperature mode even when saturation is missing
+- **CI type checks**: Mypy is enforced again after fixing type errors
 
-## [1.1.5-dev.10] - 2026-01-15
+### Notes
+- **Single Homey users**: No change needed — the integration works as before
+- **Multiple Homeys**: When a second hub is added, entities are re-scoped to avoid collisions and device visibility issues
+- **Missing status strings**: If you can’t see status/notification strings, check the string toggles in settings; you can disable them if you don’t want those entities
+
+## [1.1.6] - 2026-01-15
 
 ### 🚀 Major Real-Time Updates Release
 
@@ -569,6 +533,7 @@ This is a significant release that dramatically expands device support and platf
 - **Version numbers**: Follow semantic versioning (MAJOR.MINOR.PATCH)
 - **Sections**: Added, Changed, Fixed, Removed, Known Issues
 - **Details**: Each entry should be clear and actionable
+- **README versioning**: Update the README with stable-only versions (no dev/beta), and summarize everything since the last main release
 
 ### Contributing
 
@@ -581,4 +546,4 @@ When making changes:
 
 ---
 
-**Last Updated**: 2026-01-22
+**Last Updated**: 2026-01-27
