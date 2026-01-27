@@ -1,48 +1,27 @@
 # Homey Integration for Home Assistant
 
-## ⚠️ Action Required Before Updating
+## What’s New in 1.1.7
 
-**This update includes major real-time improvements and requires a NEW API key.**
+### 🌐 Multi-Homey Support
+- Supports multiple Homey hubs with collision-safe device IDs
+- Auto-rescope when a second hub is added (single-hub users are unaffected)
+- Notifications for migration status and duplicate hub detection
 
-1. Go to **Homey Settings → API Keys**
-2. **Create a new API key** with these permissions:
-   
-   **Required Permissions:**
-   - **View devices** (`homey.device.readonly`) - Required to read device states and discover devices
-   - **Control devices** (`homey.device.control`) - Required to control devices (turn on/off, set brightness, etc.)
-   - **View System** (`homey.system.readonly`) - Required for Socket.IO real-time updates. Without this, the integration will use polling (5-10 second updates) instead of instant updates (< 1 second).
-   
-   **Recommended Permissions:**
-   - **View Zones** (`homey.zone.readonly`) - Recommended for room/area organization. Without this, devices won't be organized by Homey rooms.
-   - **View Flows** (`homey.flow.readonly`) - Recommended to list Flows (needed for Flow button entities and service calls using flow names)
-   - **Start Flows** (`homey.flow.start`) - Recommended to trigger, enable, and disable Flows
-   - **View Moods** (`homey.mood.readonly`) - Recommended to list Moods (needed for Mood entities)
-   - **Set Moods** (`homey.mood.set`) - Recommended to trigger Moods
-3. Update the integration in Home Assistant (**Settings → Devices & Services → Homey → Configure**)
-4. Restart Home Assistant or reload the integration
+### 🧠 Homey Logic Variables
+- Logic numbers/booleans/strings now appear as Number, Switch, and Text entities
+- **API key update required** if you don’t have the permissions:
+  - **View Variables** (`homey.logic.readonly`) to read variables
+  - **Variables** (`homey.logic`) to edit variables from Home Assistant
 
-Without this permission, real-time updates will not work and the integration will fall back to polling (5-10 seconds).
+### ⚙️ Options & Settings Improvements
+- Update Homey host/IP and API key from the integration options
+- More stable string exposure toggles and related settings
 
----
+### 🧰 Cover & Stability Fixes
+- Better handling for enum vs numeric cover capabilities
+- Prevents cleanup from removing the virtual "Homey Logic" device
 
-## What’s New in 1.1.6
-
-### 🚀 Major Real-Time Updates
-- **Socket.IO real-time updates** (< 1 second latency)
-- Automatic fallback to polling (5-10 seconds) if Socket.IO fails
-- Reduced log noise for Socket.IO updates
-
-### ✅ New Configuration Options
-- **Options flow** to change Homey host/IP, API key, and fallback polling interval
-- **Reauthentication flow** when API key becomes invalid
-- **Auto-recovery** after Homey restart or network outages
-
-### 🧰 Stability & Fixes
-- Cover position compatibility fixes for older Home Assistant versions
-- Device selection defaults to **all devices selected**
-- Prevents device removals when Homey temporarily returns no devices
-
-For the full list of changes, additions, and fixes, see the [CHANGELOG](https://github.com/ifMike/homeyHASS/blob/v1.1.6/CHANGELOG.md).
+For the full list of changes, additions, and fixes, see the [CHANGELOG](https://github.com/ifMike/homeyHASS/blob/v1.1.7/CHANGELOG.md).
 
 ---
 
