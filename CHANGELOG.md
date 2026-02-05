@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.8] - 2026-01-27
+
+### Fixed
+- **Cover stop**: Enum-based covers now stop correctly even when position capability exists
+- **Token prompts**: Avoids nightly reauth on transient 401s and logs the reason clearly for troubleshooting
+
 ## [1.1.7] - 2026-01-27
 
 **Highlights**
