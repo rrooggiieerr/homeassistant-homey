@@ -122,18 +122,11 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
         )
         
         # Check if windowcoverings_state is enum-based (up/idle/down) or numeric (0-1)
-        # Only windowcoverings_set supports numeric position, windowcoverings_state can be either
+        # windowcoverings_set supports numeric position; windowcoverings_state can be enum or numeric
         self._supports_position = False
         self._is_enum_based = False
-        if self._windowcoverings_set_cap:
-            # windowcoverings_set always supports numeric position
-            self._supports_position = True
-            self._is_enum_based = False  # Explicitly set to False for windowcoverings_set
-            _LOGGER.debug(
-                "Device %s uses windowcoverings_set (numeric) - supports position control",
-                device_id
-            )
-        elif self._windowcoverings_state_cap:
+
+        if self._windowcoverings_state_cap:
             state_cap = self._state_capability_data
             # Check if it's an enum type (has "values" array)
             if state_cap.get("type") == "enum" or state_cap.get("values"):
@@ -143,13 +136,21 @@ class HomeyCover(CoordinatorEntity, CoverEntity):
                     device_id
                 )
             else:
-                # Numeric windowcoverings_state supports position
-                self._supports_position = True
-                self._is_enum_based = False
                 _LOGGER.debug(
                     "Device %s uses windowcoverings_state (numeric) - supports position control",
                     device_id
                 )
+
+        if self._windowcoverings_set_cap:
+            # windowcoverings_set always supports numeric position
+            self._supports_position = True
+            _LOGGER.debug(
+                "Device %s uses windowcoverings_set (numeric) - supports position control",
+                device_id
+            )
+        elif self._windowcoverings_state_cap and not self._is_enum_based:
+            # Numeric windowcoverings_state supports position
+            self._supports_position = True
         
         supported_features = CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE | CoverEntityFeature.STOP
         
