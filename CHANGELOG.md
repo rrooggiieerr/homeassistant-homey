@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.8] - 2026-01-27
+## [1.1.8] - 2026-02-05
 
 ### Fixed
 - **Cover stop**: Enum-based covers now stop correctly even when position capability exists
@@ -553,4 +553,4 @@ When making changes:
 
 ---
 
-**Last Updated**: 2026-01-27
+**Last Updated**: 2026-02-05
