@@ -60,6 +60,8 @@ class HomeyAPI:
         self._sio_reconnect_interval: int = 60  # Try to reconnect every 60 seconds
         self._sio_last_reconnect_attempt: float = 0
         self._polling_logged: bool = False  # Track if we've logged polling status
+        self._auth_failure_count: int = 0
+        self._last_auth_failure: float | None = None
 
     async def connect(self) -> None:
         """Connect to Homey API."""
@@ -183,6 +185,7 @@ class HomeyAPI:
                 f"{API_DEVICES_V1}/",  # /api/v1/device/
             ]
         
+        auth_error_count = 0
         for endpoint in endpoints_to_try:
             try:
                 async with self.session.get(f"{self.host}{endpoint}") as response:
@@ -199,9 +202,20 @@ class HomeyAPI:
                         if not self._polling_logged:
                             _LOGGER.info("Polling working - successfully retrieved %d devices using endpoint: %s", len(self.devices), endpoint)
                             self._polling_logged = True
+                        # Reset auth failure tracking on success
+                        self._auth_failure_count = 0
+                        self._last_auth_failure = None
                         return self.devices
                     elif response.status == 401:
-                        raise ConfigEntryAuthFailed("Invalid API key")
+                        auth_error_count += 1
+                        _LOGGER.warning(
+                            "Authentication failed (401) for devices endpoint %s. "
+                            "This can trigger reauth if repeated. Possible causes: "
+                            "token invalidated on Homey, hub temporarily unreachable, "
+                            "or host resolves to a different Homey in multi-hub setups.",
+                            endpoint,
+                        )
+                        continue
                     elif response.status == 404:
                         _LOGGER.debug("Endpoint %s not found, trying next...", endpoint)
                         continue
@@ -212,6 +226,29 @@ class HomeyAPI:
                 _LOGGER.debug("Error getting devices from %s: %s", endpoint, err)
                 continue
         
+        # If all endpoints returned 401, treat as auth failure only after repeated occurrences
+        if auth_error_count == len(endpoints_to_try):
+            now = time.time()
+            if self._last_auth_failure and now - self._last_auth_failure > 300:
+                # Reset counter if last failure was long ago
+                self._auth_failure_count = 0
+            self._auth_failure_count += 1
+            self._last_auth_failure = now
+
+            if self._auth_failure_count >= 3:
+                raise ConfigEntryAuthFailed("Invalid API key (repeated 401)")
+
+            _LOGGER.warning(
+                "Received 401 from all device endpoints (%d/%d). "
+                "Deferring reauth until repeated failures. "
+                "If this happens nightly on a secondary hub, verify that each hub "
+                "uses a unique host (avoid shared mDNS like homey.local), and that "
+                "the API key remains valid for that hub.",
+                self._auth_failure_count,
+                len(endpoints_to_try),
+            )
+            return self.devices or {}
+
         # Log error if polling was previously working, or if this is the first attempt
         if self._polling_logged:
             _LOGGER.error("Polling failed - unable to retrieve devices from any endpoint")
