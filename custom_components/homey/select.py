@@ -10,9 +10,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import CONF_USE_CAPABILITY_TITLES, DOMAIN
 from .coordinator import HomeyDataUpdateCoordinator
-from .device_info import build_entity_unique_id, get_device_info
+from .device_info import build_entity_unique_id, get_capability_label, get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,6 +39,9 @@ async def async_setup_entry(
     homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
+    use_titles = entry.options.get(
+        CONF_USE_CAPABILITY_TITLES, entry.data.get(CONF_USE_CAPABILITY_TITLES)
+    )
     devices = coordinator.data if coordinator.data else await api.get_devices()
     
     # Filter devices if device_filter is configured
@@ -55,7 +58,18 @@ async def async_setup_entry(
                 # Check if capability has options/values (enum type)
                 if "values" in cap_data or "options" in cap_data or cap_data.get("type") == "enum":
                     entities.append(
-                        HomeySelect(coordinator, device_id, device, capability_id, cap_data, api, zones, homey_id, multi_homey)
+                        HomeySelect(
+                            coordinator,
+                            device_id,
+                            device,
+                            capability_id,
+                            cap_data,
+                            api,
+                            zones,
+                            homey_id,
+                            multi_homey,
+                            use_titles,
+                        )
                     )
         
         # Then, handle ALL enum-type capabilities generically (including unknown ones)
@@ -80,7 +94,18 @@ async def async_setup_entry(
                     continue
                 
                 entities.append(
-                    HomeySelect(coordinator, device_id, device, capability_id, cap_data, api, zones, homey_id, multi_homey)
+                    HomeySelect(
+                        coordinator,
+                        device_id,
+                        device,
+                        capability_id,
+                        cap_data,
+                        api,
+                        zones,
+                        homey_id,
+                        multi_homey,
+                        use_titles,
+                    )
                 )
 
     async_add_entities(entities)
@@ -100,6 +125,7 @@ class HomeySelect(CoordinatorEntity, SelectEntity):
         zones: dict[str, dict[str, Any]] | None = None,
         homey_id: str | None = None,
         multi_homey: bool = False,
+        use_titles: bool | None = None,
     ) -> None:
         """Initialize the select entity."""
         super().__init__(coordinator)
@@ -112,8 +138,9 @@ class HomeySelect(CoordinatorEntity, SelectEntity):
         self._multi_homey = multi_homey
         
         device_name = device.get("name", "Unknown Device")
-        capability_title = capability_data.get("title")
-        capability_label = capability_title or capability_id.replace("_", " ").title()
+        capability_label = get_capability_label(
+            capability_id, capability_data, use_titles, legacy_uses_title=True
+        )
         self._attr_name = f"{device_name} {capability_label}"
         self._attr_unique_id = build_entity_unique_id(
             homey_id, device_id, capability_id, multi_homey

@@ -13,11 +13,12 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     CAPABILITY_TO_PLATFORM,
     CONF_EXPOSE_SETTABLE_TEXT,
+    CONF_USE_CAPABILITY_TITLES,
     DEFAULT_EXPOSE_SETTABLE_TEXT,
     DOMAIN,
 )
 from .coordinator import HomeyDataUpdateCoordinator, HomeyLogicUpdateCoordinator
-from .device_info import build_entity_unique_id, get_device_info
+from .device_info import build_entity_unique_id, get_capability_label, get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,6 +50,10 @@ async def async_setup_entry(
     if not expose_settable_text:
         _LOGGER.debug("Settable text entities disabled by options")
 
+    use_titles = entry.options.get(
+        CONF_USE_CAPABILITY_TITLES, entry.data.get(CONF_USE_CAPABILITY_TITLES)
+    )
+
     if expose_settable_text:
         for device_id, device in devices.items():
             capabilities = device.get("capabilitiesObj", {})
@@ -78,6 +83,7 @@ async def async_setup_entry(
                         zones,
                         homey_id,
                         multi_homey,
+                        use_titles,
                     )
                 )
 
@@ -118,6 +124,7 @@ class HomeyText(CoordinatorEntity, TextEntity):
         zones: dict[str, dict[str, Any]] | None = None,
         homey_id: str | None = None,
         multi_homey: bool = False,
+        use_titles: bool | None = None,
     ) -> None:
         """Initialize the text entity."""
         super().__init__(coordinator)
@@ -130,8 +137,9 @@ class HomeyText(CoordinatorEntity, TextEntity):
         self._multi_homey = multi_homey
 
         device_name = device.get("name", "Unknown Device")
-        capability_title = capability_data.get("title")
-        capability_label = capability_title or capability_id.replace("_", " ").title()
+        capability_label = get_capability_label(
+            capability_id, capability_data, use_titles, legacy_uses_title=True
+        )
         self._attr_name = f"{device_name} {capability_label}"
         self._attr_unique_id = build_entity_unique_id(
             homey_id, device_id, capability_id, multi_homey

@@ -12,6 +12,7 @@ CONF_RECOVERY_COOLDOWN = "recovery_cooldown"
 CONF_INVERT_LIGHT_TEMPERATURE = "invert_light_temperature"
 CONF_EXPOSE_SETTABLE_TEXT = "expose_settable_text"
 CONF_EXPOSE_READONLY_STRINGS = "expose_readonly_strings"
+CONF_USE_CAPABILITY_TITLES = "use_capability_titles"
 
 DEFAULT_NAME = "Homey"
 DEFAULT_POLL_INTERVAL = 10  # seconds (fallback when Socket.IO is down)
@@ -19,6 +20,7 @@ DEFAULT_RECOVERY_COOLDOWN = 300  # seconds
 DEFAULT_INVERT_LIGHT_TEMPERATURE = True
 DEFAULT_EXPOSE_SETTABLE_TEXT = False
 DEFAULT_EXPOSE_READONLY_STRINGS = True
+DEFAULT_USE_CAPABILITY_TITLES = False
 
 # GitHub issue URL for reporting new/unknown capabilities
 CAPABILITY_REPORT_ISSUE_URL = "https://github.com/ifMike/homeyHASS/issues/new"

@@ -58,7 +58,8 @@
           "poll_interval": "Fallback polling interval (seconds)",
           "recovery_cooldown": "Recovery cooldown (seconds, between auto-recovery attempts)",
           "expose_settable_text": "Expose string capabilities as editable text inputs (disables read-only)",
-          "expose_readonly_strings": "Expose string capabilities as read-only sensors (default, off when editable is enabled)"
+          "expose_readonly_strings": "Expose string capabilities as read-only sensors (default, off when editable is enabled)",
+          "use_capability_titles": "Use Homey capability titles for entity names"
         }
       },
       "device_management": {

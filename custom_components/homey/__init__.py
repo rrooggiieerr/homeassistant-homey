@@ -337,6 +337,96 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             async_test_capability_report,
             schema=vol.Schema({vol.Optional("entry_id"): cv.string}),
         )
+
+        async def async_rename_entities_to_titles(call) -> None:
+            """Rename Homey entity display names to capability titles."""
+            entry_id = call.data.get("entry_id")
+            entry_data = None
+
+            if entry_id:
+                entry_data = hass.data[DOMAIN].get(entry_id)
+            else:
+                # Use the first available entry
+                if hass.data[DOMAIN]:
+                    for data_key, data_value in hass.data[DOMAIN].items():
+                        if isinstance(data_value, dict) and "coordinator" in data_value:
+                            entry_data = data_value
+                            entry_id = data_key
+                            break
+
+            if not entry_data or not entry_id:
+                _LOGGER.error("No Homey entry available to rename entities")
+                return
+
+            coordinator_instance = entry_data.get("coordinator")
+            if not coordinator_instance:
+                _LOGGER.error("Homey coordinator not available for renaming entities")
+                return
+
+            devices = coordinator_instance.data or {}
+            entity_registry = er.async_get(hass)
+            device_registry = dr.async_get(hass)
+            homey_id = entry_data.get("homey_id")
+            multi_homey = entry_data.get("multi_homey", False)
+
+            updated = 0
+            for entity_entry in entity_registry.entities.values():
+                if entity_entry.platform != DOMAIN:
+                    continue
+                if entity_entry.config_entry_id != entry_id:
+                    continue
+                if not entity_entry.unique_id or not entity_entry.device_id:
+                    continue
+
+                device_entry = device_registry.async_get(entity_entry.device_id)
+                if not device_entry:
+                    continue
+
+                device_id = None
+                for identifier in device_entry.identifiers:
+                    device_id = extract_device_id(identifier)
+                    if device_id:
+                        break
+
+                if not device_id:
+                    continue
+
+                device = devices.get(device_id)
+                if not device:
+                    continue
+
+                prefix = (
+                    f"homey_{homey_id}_{device_id}_"
+                    if (multi_homey and homey_id)
+                    else f"homey_{device_id}_"
+                )
+                if not entity_entry.unique_id.startswith(prefix):
+                    continue
+
+                capability_id = entity_entry.unique_id[len(prefix):]
+                if capability_id == "onoff":
+                    continue
+
+                capability_data = device.get("capabilitiesObj", {}).get(capability_id, {})
+                title = capability_data.get("title")
+                if not title:
+                    continue
+
+                new_name = f"{device.get('name', 'Unknown')} {title}"
+                if entity_entry.name == new_name or entity_entry.original_name == new_name:
+                    continue
+
+                entity_registry.async_update_entity(entity_entry.entity_id, name=new_name)
+                updated += 1
+
+            _LOGGER.info("Renamed %d Homey entities to capability titles", updated)
+
+        hass.services.async_register(
+            DOMAIN,
+            "rename_entities_to_titles",
+            async_rename_entities_to_titles,
+            schema=vol.Schema({vol.Optional("entry_id"): cv.string}),
+        )
         hass.data[DOMAIN]["services_registered"] = True
 
     # Forward the setup to the platforms

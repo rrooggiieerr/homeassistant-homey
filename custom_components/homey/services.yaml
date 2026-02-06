@@ -7,3 +7,12 @@ test_capability_report:
       description: Optional Homey config entry ID to target if multiple entries exist.
       example: "abc123def456"
 
+rename_entities_to_titles:
+  name: Rename Entities to Titles
+  description: Update Homey entity display names to use capability titles (entity_id unchanged).
+  fields:
+    entry_id:
+      name: Config Entry ID
+      description: Optional Homey config entry ID to target if multiple entries exist.
+      example: "abc123def456"
+

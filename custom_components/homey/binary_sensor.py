@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import CONF_USE_CAPABILITY_TITLES, DOMAIN
 from .coordinator import HomeyDataUpdateCoordinator
 from .device_info import build_entity_unique_id, get_device_info
 
@@ -64,6 +64,9 @@ async def async_setup_entry(
     homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
+    use_titles = entry.options.get(
+        CONF_USE_CAPABILITY_TITLES, entry.data.get(CONF_USE_CAPABILITY_TITLES)
+    )
     # Use coordinator data if available (more up-to-date), otherwise fetch fresh
     devices = coordinator.data if coordinator.data else await api.get_devices()
     
@@ -82,7 +85,17 @@ async def async_setup_entry(
                 if cap_data.get("setable"):
                     continue
                 entities.append(
-                    HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones, homey_id, multi_homey)
+                    HomeyBinarySensor(
+                        coordinator,
+                        device_id,
+                        device,
+                        capability_id,
+                        api,
+                        zones,
+                        homey_id,
+                        multi_homey,
+                        use_titles,
+                    )
                 )
 
         # Then, handle ALL boolean capabilities generically (including unknown ones)
@@ -122,9 +135,19 @@ async def async_setup_entry(
                 continue
             
             # Create binary sensor for this boolean capability
-            entities.append(
-                HomeyBinarySensor(coordinator, device_id, device, capability_id, api, zones, homey_id, multi_homey)
-            )
+                entities.append(
+                    HomeyBinarySensor(
+                        coordinator,
+                        device_id,
+                        device,
+                        capability_id,
+                        api,
+                        zones,
+                        homey_id,
+                        multi_homey,
+                        use_titles,
+                    )
+                )
 
     async_add_entities(entities)
 
@@ -142,6 +165,7 @@ class HomeyBinarySensor(CoordinatorEntity, BinarySensorEntity):
         zones: dict[str, dict[str, Any]] | None = None,
         homey_id: str | None = None,
         multi_homey: bool = False,
+        use_titles: bool | None = None,
     ) -> None:
         """Initialize the binary sensor."""
         super().__init__(coordinator)
@@ -154,9 +178,12 @@ class HomeyBinarySensor(CoordinatorEntity, BinarySensorEntity):
 
         # Handle sub-capabilities (e.g., alarm_motion.outside)
         base_capability = capability_id.split(".")[0] if "." in capability_id else capability_id
-        
+        capability_data = device.get("capabilitiesObj", {}).get(capability_id, {})
+
         # Generate entity name - handle sub-capabilities
-        if "." in capability_id:
+        if use_titles is True and capability_data.get("title"):
+            self._attr_name = f"{device.get('name', 'Unknown')} {capability_data.get('title')}"
+        elif "." in capability_id:
             # Sub-capability: "alarm_motion.outside" -> "Outside Motion"
             parts = capability_id.split(".")
             base_name = parts[0].replace("alarm_", "").replace("_", " ").title()

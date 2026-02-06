@@ -49,6 +49,28 @@ def split_device_identifier(identifier: tuple[str, str]) -> tuple[str | None, st
 _LOGGER = logging.getLogger(__name__)
 
 
+def format_capability_label(capability_id: str) -> str:
+    """Format a capability ID into a human-friendly label."""
+    return capability_id.replace("_", " ").title()
+
+
+def get_capability_label(
+    capability_id: str,
+    capability_data: dict[str, Any] | None,
+    use_titles: bool | None,
+    *,
+    legacy_uses_title: bool,
+) -> str:
+    """Return a label for a capability, respecting title preference."""
+    title = (capability_data or {}).get("title")
+    fallback = format_capability_label(capability_id)
+    if use_titles is True:
+        return title or fallback
+    if use_titles is False:
+        return fallback
+    # Legacy behavior: only use titles where they were already used before
+    return title or fallback if legacy_uses_title else fallback
+
 def get_device_type(capabilities: dict[str, Any], driver_uri: str | None = None, device_class: str | None = None) -> str:
     """Determine device type based on capabilities, driver URI, and optionally Homey device class.
     

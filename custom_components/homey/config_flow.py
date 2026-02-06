@@ -23,12 +23,14 @@ from .const import (
     CONF_INVERT_LIGHT_TEMPERATURE,
     CONF_EXPOSE_SETTABLE_TEXT,
     CONF_EXPOSE_READONLY_STRINGS,
+    CONF_USE_CAPABILITY_TITLES,
     CONF_TOKEN,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_RECOVERY_COOLDOWN,
     DEFAULT_INVERT_LIGHT_TEMPERATURE,
     DEFAULT_EXPOSE_SETTABLE_TEXT,
     DEFAULT_EXPOSE_READONLY_STRINGS,
+    DEFAULT_USE_CAPABILITY_TITLES,
     DOMAIN,
 )
 from .device_info import get_device_type
@@ -548,6 +550,7 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore
                     CONF_TOKEN: self.token,
                     "working_endpoint": self.working_endpoint,
                     CONF_DEVICE_FILTER: selected_device_ids,  # None means import all
+                    CONF_USE_CAPABILITY_TITLES: True,
                 },
             )
         
@@ -561,6 +564,7 @@ class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore
                     CONF_TOKEN: self.token,
                     "working_endpoint": self.working_endpoint,
                     CONF_DEVICE_FILTER: None,  # Import all
+                    CONF_USE_CAPABILITY_TITLES: True,
                 },
             )
         
@@ -757,6 +761,16 @@ class HomeyOptionsFlowHandlerLegacy(config_entries.OptionsFlow):
             expose_readonly_strings = user_input.get(
                 CONF_EXPOSE_READONLY_STRINGS, DEFAULT_EXPOSE_READONLY_STRINGS
             )
+            existing_use_titles = self.config_entry.options.get(
+                CONF_USE_CAPABILITY_TITLES,
+                self.config_entry.data.get(CONF_USE_CAPABILITY_TITLES),
+            )
+            use_titles = user_input.get(
+                CONF_USE_CAPABILITY_TITLES,
+                existing_use_titles
+                if existing_use_titles is not None
+                else DEFAULT_USE_CAPABILITY_TITLES,
+            )
 
             if not host.startswith(("http://", "https://")):
                 host = f"http://{host}"
@@ -768,6 +782,8 @@ class HomeyOptionsFlowHandlerLegacy(config_entries.OptionsFlow):
                 CONF_EXPOSE_SETTABLE_TEXT: expose_text,
                 CONF_EXPOSE_READONLY_STRINGS: expose_readonly_strings,
             }
+            if existing_use_titles is not None or use_titles:
+                new_data[CONF_USE_CAPABILITY_TITLES] = use_titles
             if token:
                 new_data[CONF_TOKEN] = token
 
@@ -779,6 +795,8 @@ class HomeyOptionsFlowHandlerLegacy(config_entries.OptionsFlow):
                 CONF_EXPOSE_SETTABLE_TEXT: expose_text,
                 CONF_EXPOSE_READONLY_STRINGS: expose_readonly_strings,
             }
+            if existing_use_titles is not None or use_titles:
+                new_options[CONF_USE_CAPABILITY_TITLES] = use_titles
 
             self.hass.config_entries.async_update_entry(
                 self.config_entry, data=new_data, options=new_options
@@ -807,6 +825,10 @@ class HomeyOptionsFlowHandlerLegacy(config_entries.OptionsFlow):
                 CONF_EXPOSE_READONLY_STRINGS,
                 self.config_entry.data.get(CONF_EXPOSE_READONLY_STRINGS, DEFAULT_EXPOSE_READONLY_STRINGS),
             ),
+            CONF_USE_CAPABILITY_TITLES: self.config_entry.options.get(
+                CONF_USE_CAPABILITY_TITLES,
+                self.config_entry.data.get(CONF_USE_CAPABILITY_TITLES, DEFAULT_USE_CAPABILITY_TITLES),
+            ),
         }
         options_schema = vol.Schema(
             {
@@ -829,6 +851,10 @@ class HomeyOptionsFlowHandlerLegacy(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_EXPOSE_READONLY_STRINGS,
                     default=defaults[CONF_EXPOSE_READONLY_STRINGS],
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_USE_CAPABILITY_TITLES,
+                    default=defaults[CONF_USE_CAPABILITY_TITLES],
                 ): selector.BooleanSelector(),
             }
         )
@@ -1140,6 +1166,7 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
         invert_temp_label = "Invert normalized light temperature (fixes warm/cold reversal)"
         expose_text_label = "Expose string capabilities as editable text inputs (exclusive)"
         expose_readonly_strings_label = "Expose string capabilities as read-only sensors (default)"
+        use_titles_label = "Use Homey capability titles for entity names"
         if user_input is not None:
             def _get(label_key: str, config_key: str, default: Any) -> Any:
                 if label_key in user_input:
@@ -1164,6 +1191,17 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_EXPOSE_READONLY_STRINGS,
                 expose_readonly_strings,
             )
+            existing_use_titles = self._entry.options.get(
+                CONF_USE_CAPABILITY_TITLES,
+                self._entry.data.get(CONF_USE_CAPABILITY_TITLES),
+            )
+            use_titles = _get(
+                use_titles_label,
+                CONF_USE_CAPABILITY_TITLES,
+                existing_use_titles
+                if existing_use_titles is not None
+                else DEFAULT_USE_CAPABILITY_TITLES,
+            )
             if expose_text:
                 # Prevent duplicates: editable text inputs take priority.
                 expose_readonly_strings = False
@@ -1178,6 +1216,8 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_EXPOSE_SETTABLE_TEXT: expose_text,
                 CONF_EXPOSE_READONLY_STRINGS: expose_readonly_strings,
             }
+            if existing_use_titles is not None or use_titles:
+                new_data[CONF_USE_CAPABILITY_TITLES] = use_titles
             if token:
                 new_data[CONF_TOKEN] = token
 
@@ -1189,6 +1229,8 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_EXPOSE_SETTABLE_TEXT: expose_text,
                 CONF_EXPOSE_READONLY_STRINGS: expose_readonly_strings,
             }
+            if existing_use_titles is not None or use_titles:
+                new_options[CONF_USE_CAPABILITY_TITLES] = use_titles
 
             self.hass.config_entries.async_update_entry(
                 self._entry, data=new_data, options=new_options
@@ -1214,6 +1256,10 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
             expose_readonly_strings_label: self._entry.options.get(
                 CONF_EXPOSE_READONLY_STRINGS,
                 self._entry.data.get(CONF_EXPOSE_READONLY_STRINGS, DEFAULT_EXPOSE_READONLY_STRINGS),
+            ),
+            use_titles_label: self._entry.options.get(
+                CONF_USE_CAPABILITY_TITLES,
+                self._entry.data.get(CONF_USE_CAPABILITY_TITLES, DEFAULT_USE_CAPABILITY_TITLES),
             ),
         }
         if defaults[expose_text_label]:
@@ -1243,6 +1289,10 @@ class HomeyOptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional(
                     expose_readonly_strings_label,
                     default=defaults[expose_readonly_strings_label],
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    use_titles_label,
+                    default=defaults[use_titles_label],
                 ): selector.BooleanSelector(),
             }
         )

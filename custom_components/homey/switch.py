@@ -10,9 +10,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CAPABILITY_TO_PLATFORM, DOMAIN
+from .const import CAPABILITY_TO_PLATFORM, CONF_USE_CAPABILITY_TITLES, DOMAIN
 from .coordinator import HomeyDataUpdateCoordinator, HomeyLogicUpdateCoordinator
-from .device_info import build_entity_unique_id, get_device_info
+from .device_info import build_entity_unique_id, get_capability_label, get_device_info
 from .button import is_maintenance_button
 
 _LOGGER = logging.getLogger(__name__)
@@ -32,6 +32,9 @@ async def async_setup_entry(
     homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
+    use_titles = entry.options.get(
+        CONF_USE_CAPABILITY_TITLES, entry.data.get(CONF_USE_CAPABILITY_TITLES)
+    )
     # Use coordinator data if available (more up-to-date), otherwise fetch fresh
     devices = coordinator.data if coordinator.data else await api.get_devices()
     
@@ -142,7 +145,19 @@ async def async_setup_entry(
             # Create switch entity for each onoff capability
             # For multi-channel devices, this creates multiple switch entities
             for onoff_cap in onoff_capabilities:
-                entities.append(HomeySwitch(coordinator, device_id, device, api, zones, onoff_cap, homey_id, multi_homey))
+                entities.append(
+                    HomeySwitch(
+                        coordinator,
+                        device_id,
+                        device,
+                        api,
+                        zones,
+                        onoff_cap,
+                        homey_id,
+                        multi_homey,
+                        use_titles,
+                    )
+                )
                 _LOGGER.info(
                     "Created switch entity for device %s (%s) - capability: %s, driver: %s, class: %s",
                     device_id,
@@ -154,7 +169,19 @@ async def async_setup_entry(
 
             # Create switches for other settable boolean capabilities
             for capability_id in extra_switch_capabilities:
-                entities.append(HomeySwitch(coordinator, device_id, device, api, zones, capability_id, homey_id, multi_homey))
+                entities.append(
+                    HomeySwitch(
+                        coordinator,
+                        device_id,
+                        device,
+                        api,
+                        zones,
+                        capability_id,
+                        homey_id,
+                        multi_homey,
+                        use_titles,
+                    )
+                )
                 _LOGGER.info(
                     "Created switch entity for device %s (%s) - capability: %s, driver: %s, class: %s",
                     device_id,
@@ -212,6 +239,7 @@ class HomeySwitch(CoordinatorEntity, SwitchEntity):
         onoff_capability: str = "onoff",
         homey_id: str | None = None,
         multi_homey: bool = False,
+        use_titles: bool | None = None,
     ) -> None:
         """Initialize the switch.
         
@@ -240,12 +268,12 @@ class HomeySwitch(CoordinatorEntity, SwitchEntity):
             channel = onoff_capability.replace("onoff.", "").replace("_", " ").title()
             self._attr_name = f"{device_name} {channel}"
         else:
-            capability_title = (
-                device.get("capabilitiesObj", {})
-                .get(onoff_capability, {})
-                .get("title")
+            capability_label = get_capability_label(
+                onoff_capability,
+                device.get("capabilitiesObj", {}).get(onoff_capability, {}),
+                use_titles,
+                legacy_uses_title=True,
             )
-            capability_label = capability_title or onoff_capability.replace("_", " ").title()
             self._attr_name = f"{device_name} {capability_label}"
         
         # Create unique ID based on capability

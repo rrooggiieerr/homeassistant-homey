@@ -10,9 +10,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import CONF_USE_CAPABILITY_TITLES, DOMAIN
 from .coordinator import HomeyDataUpdateCoordinator, HomeyLogicUpdateCoordinator
-from .device_info import build_entity_unique_id, get_device_info
+from .device_info import build_entity_unique_id, get_capability_label, get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,6 +45,9 @@ async def async_setup_entry(
     homey_id = hass.data[DOMAIN][entry.entry_id].get("homey_id")
 
     entities = []
+    use_titles = entry.options.get(
+        CONF_USE_CAPABILITY_TITLES, entry.data.get(CONF_USE_CAPABILITY_TITLES)
+    )
     devices = coordinator.data if coordinator.data else await api.get_devices()
     
     # Filter devices if device_filter is configured
@@ -61,7 +64,18 @@ async def async_setup_entry(
                 # Only add if settable (user can control it)
                 if cap_data.get("setable"):
                     entities.append(
-                        HomeyNumber(coordinator, device_id, device, capability_id, cap_data, api, zones, homey_id, multi_homey)
+                        HomeyNumber(
+                            coordinator,
+                            device_id,
+                            device,
+                            capability_id,
+                            cap_data,
+                            api,
+                            zones,
+                            homey_id,
+                            multi_homey,
+                            use_titles,
+                        )
                     )
         
         # Check for pattern-based number capabilities (sub-capabilities)
@@ -94,7 +108,18 @@ async def async_setup_entry(
             
             if is_number_pattern or is_numeric_settable:
                 entities.append(
-                    HomeyNumber(coordinator, device_id, device, capability_id, cap_data, api, zones, homey_id, multi_homey)
+                    HomeyNumber(
+                        coordinator,
+                        device_id,
+                        device,
+                        capability_id,
+                        cap_data,
+                        api,
+                        zones,
+                        homey_id,
+                        multi_homey,
+                        use_titles,
+                    )
                 )
 
     # Add Homey Logic number variables (not device capabilities)
@@ -134,6 +159,7 @@ class HomeyNumber(CoordinatorEntity, NumberEntity):
         zones: dict[str, dict[str, Any]] | None = None,
         homey_id: str | None = None,
         multi_homey: bool = False,
+        use_titles: bool | None = None,
     ) -> None:
         """Initialize the number entity."""
         super().__init__(coordinator)
@@ -146,7 +172,10 @@ class HomeyNumber(CoordinatorEntity, NumberEntity):
         self._multi_homey = multi_homey
         
         device_name = device.get("name", "Unknown Device")
-        self._attr_name = f"{device_name} {capability_id.replace('_', ' ').title()}"
+        capability_label = get_capability_label(
+            capability_id, capability_data, use_titles, legacy_uses_title=False
+        )
+        self._attr_name = f"{device_name} {capability_label}"
         self._attr_unique_id = build_entity_unique_id(
             homey_id, device_id, capability_id, multi_homey
         )
