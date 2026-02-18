@@ -326,14 +326,27 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             device_class = device.get("class", "unknown")
             driver_uri = device.get("driverUri", "unknown")
             driver_id = device.get("driverId", "unknown")
-            app_id = device.get("appId", "unknown")
+            app_id = device.get("appId") or "unknown"
             zone_id = device.get("zone", "")
             manufacturer = model = "unknown"
-            if driver_uri:
-                parts = str(driver_uri).split(".")
-                if len(parts) >= 2:
-                    manufacturer = parts[0] or "unknown"
-                    model = parts[-1] or "unknown"
+            if driver_uri and driver_uri != "unknown":
+                uri = str(driver_uri)
+                # Handle homey:app:vendor.model format (e.g. homey:app:me.nanoleaf)
+                if uri.startswith("homey:app:"):
+                    app_part = uri[len("homey:app:") :].strip()
+                    if not app_id or app_id == "unknown":
+                        app_id = app_part or app_id
+                    dot_parts = app_part.split(".")
+                    if len(dot_parts) >= 2:
+                        manufacturer = dot_parts[0] or "unknown"
+                        model = dot_parts[-1] or "unknown"
+                    elif app_part:
+                        manufacturer = app_part
+                else:
+                    parts = uri.split(".")
+                    if len(parts) >= 2:
+                        manufacturer = parts[0] or "unknown"
+                        model = parts[-1] or "unknown"
             capabilities_obj = device.get("capabilitiesObj", {})
             zone_name = ""
             if zone_id and self.zones:
@@ -404,20 +417,6 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         issue_title = "New Homey capability detected"
         issue_labels = "enhancement"
-        unknown_bases = sorted(
-            {c.split(".")[0] if "." in c else c for c in new_caps}
-            - set(CAPABILITY_TO_PLATFORM)
-        )
-        impl_hint = ""
-        if unknown_bases:
-            impl_hint = (
-                "\n### Suggested implementation (for unknown capabilities)\n\n"
-                "Add to `const.py` CAPABILITY_TO_PLATFORM or platform-specific logic:\n"
-                + "\n".join(
-                    f"- `{b}` -> see suggested_platform in device details above"
-                    for b in unknown_bases[:10]
-                )
-            )
         body_lines = [
             "## New Homey capability detected",
             "",
@@ -430,8 +429,6 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             "- Please describe which entities are missing or incorrect.",
             "- Include screenshots if possible.",
         ]
-        if impl_hint:
-            body_lines.extend(["", impl_hint])
         issue_body = "\n".join(body_lines)
         issue_url = (
             f"{CAPABILITY_REPORT_ISSUE_URL}"
