@@ -95,12 +95,15 @@ def get_device_type(capabilities: dict[str, Any], driver_uri: str | None = None,
     # Reference: https://apps.developer.homey.app/the-basics/devices/capabilities
     # Complete mapping of all Homey device classes to HA entity types
     if device_class:
+        # Reference: https://apps-sdk-v3.developer.homey.app/tutorial-device-classes.html
         class_mapping = {
             # Core device classes
             "light": "light",
             "socket": "switch",  # Homey "socket" = switch/outlet in HA
+            "switch": "switch",
             "sensor": "sensor",
             "thermostat": "climate",
+            "heater": "climate",
             "speaker": "media_player",
             "tv": "media_player",
             "remote": "sensor",  # Remotes are typically sensors/binary sensors
@@ -108,16 +111,17 @@ def get_device_type(capabilities: dict[str, Any], driver_uri: str | None = None,
             # Window coverings
             "windowcoverings": "cover",  # Official Homey class for covers
             "cover": "cover",  # Alternative naming
-            # Additional classes that may exist
+            "garagedoor": "cover",
+            "curtain": "cover",
+            "blind": "cover",
+            "shutter": "cover",
+            "awning": "cover",
+            # Additional classes
             "lock": "lock",
             "fan": "fan",
+            "vacuumcleaner": "vacuum",
             "camera": "device",  # Cameras don't have a direct HA equivalent
             "doorbell": "binary_sensor",  # Doorbells are typically binary sensors
-            "garagedoor": "cover",  # Garage doors are covers
-            "curtain": "cover",  # Curtains are covers
-            "blind": "cover",  # Blinds are covers
-            "shutter": "cover",  # Shutters are covers
-            "awning": "cover",  # Awnings are covers
         }
         # Check if it's a cover first (windowcoverings_state, windowcoverings_set, or garagedoor_closed takes precedence over class)
         if any(cap in caps for cap in ["windowcoverings_state", "windowcoverings_set", "garagedoor_closed"]):

@@ -9,6 +9,7 @@ from homeassistant.components.media_player import (
     MediaPlayerEntityFeature,
     MediaPlayerState,
 )
+from homeassistant.components.media_player.const import RepeatMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -45,7 +46,14 @@ async def async_setup_entry(
         capabilities = device.get("capabilitiesObj", {})
         if any(
             cap in capabilities
-            for cap in ["volume_set", "speaker_playing", "speaker_next", "speaker_prev"]
+            for cap in [
+                "volume_set",
+                "speaker_playing",
+                "speaker_next",
+                "speaker_prev",
+                "speaker_shuffle",
+                "speaker_repeat",
+            ]
         ):
             entities.append(HomeyMediaPlayer(coordinator, device_id, device, api, zones, homey_id, multi_homey))
 
@@ -90,6 +98,10 @@ class HomeyMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
             supported_features |= MediaPlayerEntityFeature.NEXT_TRACK
         if "speaker_prev" in capabilities:
             supported_features |= MediaPlayerEntityFeature.PREVIOUS_TRACK
+        if "speaker_shuffle" in capabilities:
+            supported_features |= MediaPlayerEntityFeature.SHUFFLE_SET
+        if "speaker_repeat" in capabilities:
+            supported_features |= MediaPlayerEntityFeature.REPEAT_SET
 
         self._attr_supported_features = supported_features
 
@@ -180,6 +192,31 @@ class HomeyMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
             return utcnow()
         return None
 
+    @property
+    def shuffle(self) -> bool:
+        """Return true if shuffle is enabled."""
+        device_data = self.coordinator.data.get(self._device_id, self._device)
+        capabilities = device_data.get("capabilitiesObj", {})
+        value = capabilities.get("speaker_shuffle", {}).get("value", False)
+        return bool(value)
+
+    @property
+    def repeat(self) -> RepeatMode | str | None:
+        """Return the current repeat mode."""
+        device_data = self.coordinator.data.get(self._device_id, self._device)
+        capabilities = device_data.get("capabilitiesObj", {})
+        value = capabilities.get("speaker_repeat", {}).get("value")
+        if value is None:
+            return None
+        value_str = str(value).lower()
+        if value_str in ("off", "false", "0"):
+            return RepeatMode.OFF
+        if value_str in ("one", "1"):
+            return RepeatMode.ONE
+        if value_str in ("all", "playlist"):
+            return RepeatMode.ALL
+        return RepeatMode.OFF
+
     async def async_media_play(self) -> None:
         """Send play command."""
         if "speaker_playing" in self._device.get("capabilitiesObj", {}):
@@ -225,5 +262,18 @@ class HomeyMediaPlayer(CoordinatorEntity, MediaPlayerEntity):
         if "volume_mute" in self._device.get("capabilitiesObj", {}):
             await self._api.set_capability_value(self._device_id, "volume_mute", mute)
             # Immediately refresh this device's state for instant UI feedback
+            await self.coordinator.async_refresh_device(self._device_id)
+
+    async def async_set_shuffle(self, shuffle: bool) -> None:
+        """Enable or disable shuffle."""
+        if "speaker_shuffle" in self._device.get("capabilitiesObj", {}):
+            await self._api.set_capability_value(self._device_id, "speaker_shuffle", shuffle)
+            await self.coordinator.async_refresh_device(self._device_id)
+
+    async def async_set_repeat(self, repeat: RepeatMode) -> None:
+        """Set repeat mode. Homey uses 'off', 'one', 'all'."""
+        if "speaker_repeat" in self._device.get("capabilitiesObj", {}):
+            homey_value = repeat.value if hasattr(repeat, "value") else str(repeat)
+            await self._api.set_capability_value(self._device_id, "speaker_repeat", homey_value)
             await self.coordinator.async_refresh_device(self._device_id)
 

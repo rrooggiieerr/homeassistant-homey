@@ -24,6 +24,9 @@ CAPABILITY_TO_DEVICE_CLASS = {
     "alarm_motion": BinarySensorDeviceClass.MOTION,
     "alarm_contact": BinarySensorDeviceClass.DOOR,
     "alarm_tamper": BinarySensorDeviceClass.TAMPER,
+    "alarm_vibration": BinarySensorDeviceClass.VIBRATION,
+    "alarm_occupancy": BinarySensorDeviceClass.OCCUPANCY,
+    "alarm_presence": BinarySensorDeviceClass.PRESENCE,
     "alarm_smoke": BinarySensorDeviceClass.SMOKE,
     "alarm_co": BinarySensorDeviceClass.CO,
     "alarm_co2": None,  # CO2 device class not available in all HA versions

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import timedelta
 import logging
 import time
@@ -14,11 +15,29 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import CAPABILITY_REPORT_ISSUE_URL, CONF_DEVICE_FILTER, DOMAIN
+from .const import (
+    CAPABILITY_REPORT_ISSUE_URL,
+    CAPABILITY_TO_PLATFORM,
+    CONF_DEVICE_FILTER,
+    DOMAIN,
+)
 from .device_info import build_device_identifier, extract_device_id, split_device_identifier
 from .homey_api import HomeyAPI
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _suggest_platform(cap_type: str, setable: bool | None, base_cap: str = "") -> str:
+    """Suggest HA platform for an unknown capability."""
+    if cap_type == "boolean":
+        return "switch" if setable else "binary_sensor"
+    if cap_type == "number":
+        return "number" if setable else "sensor"
+    if cap_type == "enum":
+        return "select" if setable else "sensor"
+    if cap_type == "string":
+        return "text" if setable else "sensor"
+    return "sensor"
 
 
 class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
@@ -306,13 +325,78 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             device_name = device.get("name", "Unknown Device")
             device_class = device.get("class", "unknown")
             driver_uri = device.get("driverUri", "unknown")
+            driver_id = device.get("driverId", "unknown")
+            app_id = device.get("appId", "unknown")
+            zone_id = device.get("zone", "")
+            manufacturer = model = "unknown"
+            if driver_uri:
+                parts = str(driver_uri).split(".")
+                if len(parts) >= 2:
+                    manufacturer = parts[0] or "unknown"
+                    model = parts[-1] or "unknown"
+            capabilities_obj = device.get("capabilitiesObj", {})
+            zone_name = ""
+            if zone_id and self.zones:
+                zone_name = self.zones.get(zone_id, {}).get("name", "")
             device_lines.append(f"- {device_name} ({device_id}): {', '.join(diff)}")
+            capability_details: list[str] = []
+            for cap_id in diff:
+                cap_data = capabilities_obj.get(cap_id, {})
+                cap_type = cap_data.get("type", "unknown")
+                cap_title = cap_data.get("title")
+                cap_setable = cap_data.get("setable")
+                cap_getable = cap_data.get("getable")
+                cap_units = cap_data.get("units")
+                cap_value = cap_data.get("value")
+                cap_options = cap_data.get("values") or cap_data.get("options")
+                cap_min = cap_data.get("min")
+                cap_max = cap_data.get("max")
+                cap_step = cap_data.get("step")
+                base_cap = cap_id.split(".")[0] if "." in cap_id else cap_id
+                known_platform = CAPABILITY_TO_PLATFORM.get(base_cap)
+                suggested = _suggest_platform(cap_type, cap_setable, base_cap)
+                raw_str = json.dumps(cap_data, default=str)
+                raw_json = raw_str[:500] + ("..." if len(raw_str) > 500 else "")
+                details = [
+                    f"    - id: {cap_id}",
+                    f"      type: {cap_type}",
+                    f"      base: {base_cap}",
+                    f"      known_mapping: {known_platform or 'none'}",
+                    f"      suggested_platform: {suggested}",
+                ]
+                if cap_title is not None:
+                    details.append(f"      title: {cap_title}")
+                if cap_setable is not None:
+                    details.append(f"      setable: {cap_setable}")
+                if cap_getable is not None:
+                    details.append(f"      getable: {cap_getable}")
+                if cap_units:
+                    details.append(f"      units: {cap_units}")
+                if cap_value is not None:
+                    details.append(f"      value: {cap_value}")
+                if cap_min is not None:
+                    details.append(f"      min: {cap_min}")
+                if cap_max is not None:
+                    details.append(f"      max: {cap_max}")
+                if cap_step is not None:
+                    details.append(f"      step: {cap_step}")
+                if cap_options:
+                    details.append(f"      options: {cap_options}")
+                details.append(f"      raw: {raw_json}")
+                capability_details.append("\n".join(details))
             body_device_lines.append(
                 f"- {device_name}\n"
                 f"  - id: {device_id}\n"
                 f"  - class: {device_class}\n"
                 f"  - driverUri: {driver_uri}\n"
-                f"  - new capabilities: {', '.join(diff)}"
+                f"  - driverId: {driver_id}\n"
+                f"  - appId: {app_id}\n"
+                f"  - manufacturer: {manufacturer}\n"
+                f"  - model: {model}\n"
+                f"  - zone: {zone_id}\n"
+                f"  - zone_name: {zone_name}\n"
+                f"  - new capabilities:\n"
+                f"{chr(10).join(capability_details)}"
             )
 
         if not device_lines:
@@ -320,6 +404,20 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         issue_title = "New Homey capability detected"
         issue_labels = "enhancement"
+        unknown_bases = sorted(
+            {c.split(".")[0] if "." in c else c for c in new_caps}
+            - set(CAPABILITY_TO_PLATFORM)
+        )
+        impl_hint = ""
+        if unknown_bases:
+            impl_hint = (
+                "\n### Suggested implementation (for unknown capabilities)\n\n"
+                "Add to `const.py` CAPABILITY_TO_PLATFORM or platform-specific logic:\n"
+                + "\n".join(
+                    f"- `{b}` -> see suggested_platform in device details above"
+                    for b in unknown_bases[:10]
+                )
+            )
         body_lines = [
             "## New Homey capability detected",
             "",
@@ -332,6 +430,8 @@ class HomeyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             "- Please describe which entities are missing or incorrect.",
             "- Include screenshots if possible.",
         ]
+        if impl_hint:
+            body_lines.extend(["", impl_hint])
         issue_body = "\n".join(body_lines)
         issue_url = (
             f"{CAPABILITY_REPORT_ISSUE_URL}"
