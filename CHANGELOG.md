@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.9] - 2026-02-18
+
+### Added
+- **Opt-in capability title naming**: Homey apps can provide human-readable `title` fields for capabilities (e.g., "Temperature", "Target Temperature"). By default, entity names use the capability ID (e.g., "Living Room measure_temperature"). Enable this option in integration settings to use the app-provided titles instead (e.g., "Living Room Temperature") for cleaner names in the UI.
+- **Rename entities service**: `homey.rename_entities_to_titles` service to bulk-update existing entity display names to capability titles without changing entity_ids. Use this after enabling title naming to update entities that were created before the option was turned on.
+- **Media player shuffle/repeat**: Full support for `speaker_shuffle` and `speaker_repeat` capabilities (SHUFFLE_SET, REPEAT_SET features)
+- **Binary sensor alarm types**: Added device classes for `alarm_vibration`, `alarm_occupancy`, and `alarm_presence`
+- **Device class mappings**: Added `heater`, `switch`, and `vacuumcleaner` to central device class mapping for correct type detection
+
+### Changed
+- **Device info**: Expanded Homey device class mapping for more reliable classification
+
+### Fixed
+- **Capability reporting**: When new Homey capabilities are detected (e.g., after an app update), the integration now shows a persistent notification with device and capability details plus a prefilled GitHub issue link. Call `homey.test_capability_report` from Developer Tools → Actions to try the report flow and see the format. Reports include device class, driver, type, setable/getable flags, and suggested platform for unknown capabilities.
+
 ## [1.1.8] - 2026-02-05
 
 ### Fixed
@@ -553,4 +568,4 @@ When making changes:
 
 ---
 
-**Last Updated**: 2026-02-05
+**Last Updated**: 2026-02-18
