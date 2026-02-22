@@ -44,10 +44,70 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
     }
 )
 
+STEP_DHCP_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_TOKEN): str,
+    }
+)
+
+async def find_endpoint(host: str):
+    #ToDo Move the code from the user step to a find_endpoint method
+    return None
+
 class HomeyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
     """Handle a config flow for Homey."""
 
     VERSION = 1
+
+    async def async_step_dhcp(
+        self, discovery_info: DhcpServiceInfo
+    ) -> ConfigFlowResult:
+        """Handle DHCP discovery."""
+        macaddress = format_mac(discovery_info.macaddress)
+
+        _LOGGER.debug(
+            "DHCP discovery detected Homey on %s (%s)",
+            discovery_info.ip,
+            macaddress,
+        )
+
+        # Check if the Homey endpoint is available
+        endpoint = find_endpoint(discovery_info.ip)
+        if not endpoint:
+            return self.async_abort(reason="cannot_connect")
+        
+        # Use the mac address instead of device name as the unique id. You already have this unique identifier before login is successfull.
+        await self.async_set_unique_id(macaddress)
+        # Update host ip address when device is already configured and abort.
+        self._abort_if_unique_id_configured(updates={CONF_HOST: discovery_info.ip})
+        
+        _LOGGER.debug("Homey on %s is not yet configured", discovery_info.ip)
+        
+        self._discovered_ip = discovery_info.ip
+        self.working_endpoint = endpoint
+        
+        # Show the confirmation form
+        return await self.async_step_dhcp_confirm()
+
+    async def async_step_dhcp_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle DHCP discovery confirmation."""
+        if user_input is not None:
+            return self.async_create_entry(
+                title=name,
+                data={
+                    CONF_HOST: self._discovered_ip,
+                    CONF_TOKEN: self.token,
+                    "working_endpoint": self.working_endpoint,
+                    CONF_DEVICE_FILTER: selected_device_ids,  # None means import all
+                    CONF_USE_CAPABILITY_TITLES: True,
+                },
+            )
+
+        return self.async_show_form(
+            step_id="dhcp_confirm", data_schema=STEP_DHCP_DATA_SCHEMA, errors=errors
+        )
 
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:
         """Handle reauthentication flow."""
